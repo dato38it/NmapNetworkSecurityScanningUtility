@@ -1,36 +1,828 @@
 # Утилита для сканирования безопасности сети Nmap
 <p>
-    Утилита для сканирования безопасности сети Nmap.
+    # Подготовка ОС.<br>
+    # Настройка Iptables.<br>
+    # Настройка Vsftpd-сервера.<br>
+    # Настройка Nginx-сервера.<br>
+    # Настройка Proxy-сервера.<br>
+    # Сканирование сети Nmap.<br>
+    # Перехват трафиков в Tcpdump.<br>
+    # Блокировка подозрительных IP-адресов.<br>
+    # Безопасность сервера.<br>
+    <strong>Task:</strong><br>
+    Подготовка ОС. Подключение внешнего диска к WSl<br>
+    <strong>Decision:</strong><br>
+    &gt; wmic diskdrive list brief<br>
+    Caption&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DeviceID&nbsp;&nbsp; Model&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Partitions Size&nbsp;&nbsp;<br>
+    ST1000LM 035-1RK172 SCSI Disk Device \\.\PHYSICALDRIVE2 ST1000LM 035-1RK172 SCSI Disk Device 1&nbsp;&nbsp; 1000202273280<br>
+    ...<br>
+    &gt; wsl --mount \\.\PHYSICALDRIVE2 --partition 1<br>
+    Диск успешно подключен как "/mnt/wsl/PHYSICALDRIVE2p1".<br>
+    ...<br>
+    &gt; wsl<br>
+    # ls /mnt/wsl/PHYSICALDRIVE2p1/<br>
+    Centos_9.img Ubuntu_2204.qcow2 Windows12.qcow2 ubuntu-22.04.3-desktop-amd64.iso<br>
+    Kali.qcow2 Windows.qcow2 lost+found<br>
+    # lsblk<br>
+    NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINTS<br>
+    ...<br>
+    sdc 8:32 0 931.5G 0 disk<br>
+    └─sdc1 8:33 0 931.5G 0 part /mnt/wsl/PHYSICALDRIVE2p1<br>
+    ...<br>
+    # mount /dev/sdc1 /var/lib/libvirt/images/<br>
+    # ls /var/lib/libvirt/images/<br>
+    Centos_9.img Ubuntu_2204.qcow2 Windows12.qcow2 ubuntu-22.04.3-desktop-amd64.iso<br>
+    Kali.qcow2 Windows.qcow2 lost+found<br>
+    &gt; wsl.exe --unmount \\.\PHYSICALDRIVE2<br>
+    <strong>Source:</strong><br>
+    # https://habr.com/ru/news/518806/ - Microsoft добавила в подсистему Windows для Linux 2 (WSL2) возможность монтирования дисков<br>
+    # https://qna.habr.com/q/861519 - Где находится домашняя директория WSL?&nbsp;<br>
+    <strong>Task:</strong><br>
+    Настройка iptables. Выводим список текущих правил iptables и проанализируем какие порты открыты в сервере Centos.&nbsp;<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo yum install iptables-services<br>
+    [tuser@kvmcentos ~]$ sudo iptables --version<br>
+    [tuser@kvmcentos ~]$ sudo iptables -L -v<br>
+    Chain INPUT (policy ACCEPT 0 packets, 0 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    [tuser@kvmcentos ~]$ sudo systemctl start iptables<br>
+    [tuser@kvmcentos ~]$ sudo systemctl enable iptables<br>
+    [tuser@kvmcentos ~]$ sudo service iptables status<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap tipcentos<br>
+    Starting Nmap 7.80 ( https://nmap.org ) at 2023-10-17 08:33 CDT<br>
+    Nmap scan report for centos (tipcentos)<br>
+    Host is up (0.00089s latency).<br>
+    Not shown: 999 filtered ports<br>
+    PORT STATE SERVICE<br>
+    22/tcp open ssh<br>
+    MAC Address: 52:54:00:7e:05:15 (QEMU virtual NIC)<br>
+    Nmap done: 1 IP address (1 host up) scanned in 5.30 seconds<br>
+    <strong>Task:</strong><br>
+    Настройка iptables. В сервере Centos Напишем набор правил iptables, в котором мы разрешаем все исходящие соединения и строго ограничиваем входящие.&nbsp;<br>
+    Доступ будет возможен по портам TCP: 21, 22, 25, 53, 80, 143, 443, по портам UDP: 20, 21, 53, также мы пропускаем пакеты для уже установленных соединений.<br>
+    С удаленной машины просканируем порты на нашем сервере.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo vim firewall.sh<br>
+    [tuser@kvmcentos ~]$ sudo cat firewall.sh<br>
+    #!/bin/bash<br>
+    IPT="/sbin/iptables"<br>
+    # Очищаем правила и удаляем цепочки.<br>
+    $IPT -F<br>
+    $IPT -X<br>
+    # По умолчанию доступ запрещен.<br>
+    $IPT -P INPUT DROP<br>
+    $IPT -P FORWARD DROP<br>
+    $IPT -P OUTPUT DROP<br>
+    # Список разрешенных TCP и UDP портов.<br>
+    TCP_PORTS="21,22,25,53,80,143,443"<br>
+    UDP_PORTS="53,21,20"<br>
+    # Разрешаем пакеты для интерфейса обратной петли.<br>
+    $IPT -A INPUT -i lo -j ACCEPT<br>
+    $IPT -A OUTPUT -o lo -j ACCEPT<br>
+    # Разрешаем пакеты для установленных соединений.<br>
+    $IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT<br>
+    # Разрешаем исходящие соединения.<br>
+    $IPT -A OUTPUT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT<br>
+    # Разрешаем доступ к портам, описанным в переменных TCP_PORTS и UDP_PORTS.<br>
+    $IPT -A INPUT -p tcp -m multiport --dport $TCP_PORTS -j ACCEPT<br>
+    $IPT -A INPUT -p udp -m multiport --dport $UDP_PORTS -j ACCEPT<br>
+    # Разрешаем исходящий ping.<br>
+    $IPT -A INPUT -p icmp -m icmp --icmp-type echo-reply -j ACCEPT<br>
+    [tuser@kvmcentos ~]$ sudo chmod +x firewall.sh<br>
+    [tuser@kvmcentos ~]$ sudo ./firewall.sh<br>
+    [tuser@kvmcentos ~]$ sudo iptables -L -v<br>
+    Chain INPUT (policy DROP 1986 packets, 87384 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    0 0 ACCEPT all -- lo any anywhere anywhere&nbsp;<br>
+    79 5604 ACCEPT all -- any any anywhere anywhere state RELATED,ESTABLISHED<br>
+    9 396 ACCEPT tcp -- any any anywhere anywhere multiport dports ftp,ssh,smtp,domain,http,imap,https<br>
+    0 0 ACCEPT udp -- any any anywhere anywhere multiport dports domain,ftp,ftp-data<br>
+    0 0 ACCEPT icmp -- any any anywhere anywhere icmp echo-reply<br>
+    Chain FORWARD (policy DROP 0 packets, 0 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    Chain OUTPUT (policy DROP 0 packets, 0 bytes)<br>
+    pkts bytes target prot opt in out source destination&nbsp;<br>
+    0 0 ACCEPT all -- any lo anywhere anywhere&nbsp;<br>
+    60 7920 ACCEPT all -- any any anywhere anywhere state NEW,RELATED,ESTABLISHED<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    21/tcp closed ftp<br>
+    22/tcp open ssh<br>
+    25/tcp closed smtp<br>
+    53/tcp closed domain<br>
+    80/tcp closed http<br>
+    143/tcp closed imap<br>
+    443/tcp closed https<br>
+    ...<br>
+    <strong>Source:</strong><br>
+    # https://blog.sedicomm.com/2016/12/16/iptables-ustanovka-i-nastrojka/?ysclid=ln3wplng53988958006#1<br>
+    <strong>Task:</strong><br>
+    Настройка Vsftpd-сервера. Install and configure an FTP server. Securing the connection to the FTP server.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo dnf update -y<br>
+    [tuser@kvmcentos ~]$ sudo dnf install vsftpd -y<br>
+    [tuser@kvmcentos ~]$ sudo systemctl enable vsftpd --now<br>
+    [tuser@kvmcentos ~]$ sudo systemctl status vsftpd<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    21/tcp open ftp<br>
+    22/tcp open ssh<br>
+    25/tcp closed smtp<br>
+    53/tcp closed domain<br>
+    80/tcp closed http<br>
+    143/tcp closed imap<br>
+    443/tcp closed https<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo useradd -m -d "/home/tuser2" tuser2<br>
+    [tuser@kvmcentos ~]$ sudo passwd tuser2<br>
+    [tuser@kvmcentos ~]$ sudo mkdir -p /home/tuser2/shared<br>
+    [tuser@kvmcentos ~]$ sudo chmod -R 750 /home/tuser2/shared<br>
+    [tuser@kvmcentos ~]$ sudo chown tuser2: /home/tuser2/shared<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/vsftpd/user_list<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/vsftpd/user_list | grep ftp<br>
+    tuser2<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/vsftpd/vsftpd.conf<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/vsftpd/vsftpd.conf<br>
+    ...<br>
+    anonymous_enable=NO<br>
+    ...<br>
+    local_enable=YES<br>
+    ...<br>
+    write_enable=YES<br>
+    ...<br>
+    chroot_local_user=YES<br>
+    ...<br>
+    allow_writeable_chroot=YES<br>
+    pasv_min_port=31500<br>
+    pasv_max_port=32500<br>
+    userlist_file=/etc/vsftpd/user_list<br>
+    userlist_deny=NO<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart vsftpd<br>
+    [tuser@kvmcentos ~]$ sudo openssl req -x509 -nodes -days 3650 \<br>
+    -newkey rsa:2048 -keyout /etc/vsftpd.pem \<br>
+    -out /etc/vsftpd/vsftpd.pem<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/vsftpd/vsftpd.conf<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/vsftpd/vsftpd.conf<br>
+    ...<br>
+    #rsa_cert_file=/etc/vsftpd/vsftpd.pem<br>
+    #rsa_private_key_file=/etc/vsftpd.pem<br>
+    #ssl_enable=YES<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart vsftpd<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/sysconfig/iptables<br>
+    # Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>
+    *mangle<br>
+    :PREROUTING ACCEPT [45:3316]<br>
+    :INPUT ACCEPT [45:3316]<br>
+    :FORWARD ACCEPT [0:0]<br>
+    :OUTPUT ACCEPT [34:5048]<br>
+    :POSTROUTING ACCEPT [34:5048]<br>
+    COMMIT<br>
+    # Completed on Sun Oct 22 12:10:33 2023<br>
+    # Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>
+    *raw<br>
+    :PREROUTING ACCEPT [45:3316]<br>
+    :OUTPUT ACCEPT [34:5048]<br>
+    COMMIT<br>
+    # Completed on Sun Oct 22 12:10:33 2023<br>
+    # Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>
+    *filter<br>
+    :INPUT DROP [0:0]<br>
+    :FORWARD DROP [0:0]<br>
+    :OUTPUT DROP [0:0]<br>
+    -A INPUT -i lo -j ACCEPT<br>
+    -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT<br>
+    -A INPUT -p tcp -m multiport --dports 21,22,25,53,80,143,443 -j ACCEPT<br>
+    -A INPUT -p udp -m multiport --dports 53,21,20 -j ACCEPT<br>
+    -A INPUT -p icmp -m icmp --icmp-type 0 -j ACCEPT<br>
+    -A OUTPUT -o lo -j ACCEPT<br>
+    -A OUTPUT -m state --state NEW,RELATED,ESTABLISHED -j ACCEPT<br>
+    COMMIT<br>
+    # Completed on Sun Oct 22 12:10:33 2023<br>
+    # Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>
+    *nat<br>
+    :PREROUTING ACCEPT [0:0]<br>
+    :INPUT ACCEPT [0:0]<br>
+    :OUTPUT ACCEPT [0:0]<br>
+    :POSTROUTING ACCEPT [0:0]<br>
+    COMMIT<br>
+    # Completed on Sun Oct 22 12:10:33 2023<br>
+    [tuser@kvmcentos ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 20:21 -j ACCEPT<br>
+    [tuser@kvmcentos ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 31500:32500 -j ACCEPT<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ telnet tipcentos 21<br>
+    Trying tipcentos...<br>
+    Connected to tipcentos.<br>
+    Escape character is '^]'.<br>
+    220 (vsFTPd 3.0.5)<br>
+    USER tuser2<br>
+    331 Please specify the password.<br>
+    PASS tpassword<br>
+    230 Login successful.<br>
+    PWD<br>
+    257 "/" is the current directory<br>
+    PASV<br>
+    227 Entering Passive Mode (I,P,126,61).<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ 126*256+61<br>
+    32317<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ telnet tipcentos 32317<br>
+    Trying tipcentos...<br>
+    Connected to tipcentos.<br>
+    Escape character is '^]'.<br>
+    LIST<br>
+    150 Here comes the directory listing.<br>
+    226 Directory send OK.<br>
+    drwxr-x--- 2 1001 1001 6 Oct 21 03:06 shared<br>
+    QUIT<br>
+    221 Goodbye.<br>
+    <strong>Task:</strong><br>
+    Настройка Vsftpd-сервера. Запрещаем доступ к фтп всем пользователям, кроме пользователя с MAC-адресом 52:54:00:19:98:c5.<br>
+    <strong>Decision:</strong><br>
+    tuser@kvmubuntu:~$ ifconfig | grep 52:54:00:19:98:c5<br>
+    ether 52:54:00:19:98:c5 txqueuelen 1000 (Ethernet)<br>
+    [tuser@kvmcentos ~]$ sudo iptables -I INPUT -p tcp --dport 21 -m mac ! --mac-source 52:54:00:19:98:c5 -j REJECT<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables<br>
+    tuser@kvmubuntu:~$ ftp tipcentos<br>
+    Connected to tipcentos.<br>
+    220 (vsFTPd 3.0.5)<br>
+    Name (tipcentos:user): tuser2<br>
+    331 Please specify the password.<br>
+    Password:&nbsp;<br>
+    230 Login successful.<br>
+    Remote system type is UNIX.<br>
+    Using binary mode to transfer files.<br>
+    ftp&gt; ls<br>
+    229 Entering Extended Passive Mode (|||31695|)<br>
+    150 Here comes the directory listing.<br>
+    drwxr-x--- 2 1001 1001 6 Oct 21 03:06 shared<br>
+    226 Directory send OK.<br>
+    ftp&gt; exit<br>
+    221 Goodbye.<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ ftp tipcentos<br>
+    ftp: Can't connect to `tipcentos:21': Connection refused<br>
+    ftp: Can't connect to `tipcentos:ftp'<br>
+    ftp&gt; exit<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ telnet tipcentos 21&nbsp;<br>
+    Trying tipcentos...<br>
+    telnet: Unable to connect to remote host: Connection refused<br>
+    <strong>Source:</strong><br>
+    # https://unixcop.com/how-to-install-and-configure-an-ftp-server-on-centos-9-stream/<br>
+    # https://losst.pro/kak-otkryt-port-iptables?ysclid=lnvrpgxwj8175390861<br>
+    # https://techviewleo.com/configure-vsftpd-ftp-server-on-ubuntu-linux/<br>
+    # https://stackoverflow.com/questions/38523250/vsftpd-login-is-not-successful<br>
+    <strong>Task:</strong><br>
+    Настройка Nginx-сервера. Install Nginx.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo dnf update -y<br>
+    [tuser@kvmcentos ~]$ sudo dnf install nginx<br>
+    [tuser@kvmcentos ~]$ sudo systemctl start nginx<br>
+    [tuser@kvmcentos ~]$ sudo systemctl enable nginx<br>
+    [tuser@kvmcentos ~]$ nginx -v<br>
+    [tuser@kvmcentos ~]$ firefox http://tipcentos:80/<br>
+    <strong>Source:</strong><br>
+    # https://devcoops.com/install-nginx-on-centos-9-stream/<br>
+    <strong>Task:</strong><br>
+    Настройка Proxy-сервера. Configure Squid Proxy Kali.<br>
+    <strong>Decision:</strong><br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo apt update<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo apt install squid<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo systemctl start squid<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo systemctl enable squid<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ grep -Eiv '(^#|^$)' /etc/squid/squid.conf<br>
+    acl localnet src 0.0.0.1-0.255.255.255 # RFC 1122 "this" network (LAN)<br>
+    acl localnet src 10.0.0.0/8 # RFC 1918 local private network (LAN)<br>
+    acl localnet src 100.64.0.0/10 # RFC 6598 shared address space (CGN)<br>
+    acl localnet src 169.254.0.0/16 # RFC 3927 link-local (directly plugged) machines<br>
+    acl localnet src 172.16.0.0/12 # RFC 1918 local private network (LAN)<br>
+    acl localnet src 192.168.0.0/16 # RFC 1918 local private network (LAN)<br>
+    acl localnet src fc00::/7 # RFC 4193 local private network range<br>
+    acl localnet src fe80::/10 # RFC 4291 link-local (directly plugged) machines<br>
+    acl SSL_ports port 443<br>
+    acl Safe_ports port 80 # http<br>
+    acl Safe_ports port 21 # ftp<br>
+    acl Safe_ports port 443 # https<br>
+    acl Safe_ports port 70 # gopher<br>
+    acl Safe_ports port 210 # wais<br>
+    acl Safe_ports port 1025-65535 # unregistered ports<br>
+    acl Safe_ports port 280 # http-mgmt<br>
+    acl Safe_ports port 488 # gss-http<br>
+    acl Safe_ports port 591 # filemaker<br>
+    acl Safe_ports port 777 # multiling http<br>
+    http_access deny !Safe_ports<br>
+    http_access deny CONNECT !SSL_ports<br>
+    http_access allow localhost manager<br>
+    http_access deny manager<br>
+    http_access allow localhost<br>
+    http_access deny to_localhost<br>
+    http_access deny to_linklocal<br>
+    include /etc/squid/conf.d/*.conf<br>
+    http_access deny all<br>
+    http_port 3128<br>
+    coredump_dir /var/spool/squid<br>
+    refresh_pattern ^ftp: 1440 20% 10080<br>
+    refresh_pattern -i (/cgi-bin/|\?) 0 0% 0<br>
+    refresh_pattern . 0 20% 4320<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo mv /etc/squid/squid.conf /etc/squid/squid.conf.bac<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo vim /etc/squid/squid.conf<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo cat /etc/squid/squid.conf&nbsp;<br>
+    acl localnet src tipkali<br>
+    http_access allow localnet<br>
+    http_port 3128<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo systemctl restart squid&nbsp;<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ cat /var/log/squid/access.log<br>
+    1698153952.395 1 tipkali NONE_NONE/400 3816 - / - HIER_NONE/- text/html<br>
+    1698153953.958 7 tipkali TCP_DENIED/403 4185 GET http://kali:3128/squid-internal-static/icons/SN.png - HIER_NONE/- text/html<br>
+    ...<br>
+    1698154905.087 2 tipkali TCP_MISS/400 3889 GET http://tipkali:3128/ - HIER_DIRECT/tipkali text/html<br>
+    1698154906.698 149 tipkali TCP_TUNNEL/200 39 CONNECT static.vk.com:443 - HIER_DIRECT/87.240.137.164 -<br>
+    1698154906.796 0 tipkali NONE_NONE/400 3838 - /favicon.ico - HIER_NONE/- text/html<br>
+    1698154906.797 2 tipkali TCP_MISS/400 3911 GET http://tipkali:3128/favicon.ico - HIER_DIRECT/tipkali text/html<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo apt install apache2-utils&nbsp;<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo htpasswd -c /etc/squid/passwd user<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo vim /etc/squid/squid.conf&nbsp;<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ cat /etc/squid/squid.conf<br>
+    #acl localnet src tipkali<br>
+    #http_access allow localnet<br>
+    http_port 3128<br>
+    via off<br>
+    auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwd<br>
+    auth_param basic children 5<br>
+    auth_param basic credentialsttl 2 hours<br>
+    auth_param basic casesensitive on<br>
+    auth_param basic realm Squid proxy for kali<br>
+    acl auth_users proxy_auth REQUIRED<br>
+    http_access allow auth_users<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo systemctl restart squid<br>
+    <strong>Task:</strong><br>
+    Настройка Proxy-сервера. Configure Squid Proxy Centos.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo dnf install squid<br>
+    [tuser@kvmcentos ~]$ sudo systemctl enable --now squid<br>
+    [tuser@kvmcentos ~]$ grep -Eiv '(^#|^$)' /etc/squid/squid.conf<br>
+    acl localnet src 0.0.0.1-0.255.255.255 # RFC 1122 "this" network (LAN)<br>
+    acl localnet src 10.0.0.0/8 # RFC 1918 local private network (LAN)<br>
+    acl localnet src 100.64.0.0/10 # RFC 6598 shared address space (CGN)<br>
+    acl localnet src 169.254.0.0/16 # RFC 3927 link-local (directly plugged) machines<br>
+    acl localnet src 172.16.0.0/12 # RFC 1918 local private network (LAN)<br>
+    acl localnet src 192.168.0.0/16 # RFC 1918 local private network (LAN)<br>
+    acl localnet src fc00::/7 # RFC 4193 local private network range<br>
+    acl localnet src fe80::/10 # RFC 4291 link-local (directly plugged) machines<br>
+    acl SSL_ports port 443<br>
+    acl Safe_ports port 80 # http<br>
+    acl Safe_ports port 21 # ftp<br>
+    acl Safe_ports port 443 # https<br>
+    acl Safe_ports port 70 # gopher<br>
+    acl Safe_ports port 210 # wais<br>
+    acl Safe_ports port 1025-65535 # unregistered ports<br>
+    acl Safe_ports port 280 # http-mgmt<br>
+    acl Safe_ports port 488 # gss-http<br>
+    acl Safe_ports port 591 # filemaker<br>
+    acl Safe_ports port 777 # multiling http<br>
+    http_access deny !Safe_ports<br>
+    http_access deny CONNECT !SSL_ports<br>
+    http_access allow localhost manager<br>
+    http_access deny manager<br>
+    http_access allow localnet<br>
+    http_access allow localhost<br>
+    http_access deny all<br>
+    http_port 3128<br>
+    coredump_dir /var/spool/squid<br>
+    refresh_pattern ^ftp: 1440 20% 10080<br>
+    refresh_pattern ^gopher: 1440 0% 1440<br>
+    refresh_pattern -i (/cgi-bin/|\?) 0 0% 0<br>
+    refresh_pattern . 0 20% 4320<br>
+    [tuser@kvmcentos ~]$ sudo mv /etc/squid/squid.conf /etc/squid/squid.conf.bac<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/squid/squid.conf<br>
+    [tuser@kvmcentos ~]$ cat /etc/squid/squid.conf<br>
+    acl localnet src tipcentos<br>
+    acl localnet src tip.0/32<br>
+    acl Safe_ports port 80<br>
+    acl Safe_ports port 443<br>
+    cache_dir ufs /var/spool/squid 1000 16 256<br>
+    http_access allow localnet<br>
+    http_port 3128&nbsp;<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart squid<br>
+    [tuser@kvmcentos ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 3128 -j ACCEPT<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables.service<br>
+    [tuser@kvmcentos ~]$ sudo curl -O -L "https://www.redhat.com/index.html" -x "tipcentos:3128"<br>
+    % Total % Received % Xferd Average Speed Time Time Time Current<br>
+    &nbsp;&nbsp;&nbsp;&nbsp; Dload Upload Total Spent Left Speed<br>
+    0 0 0 0 0 0 0 0 --:--:-- --:--:-- --:--:-- 0<br>
+    100 156k 0 156k 0 0 147k 0 --:--:-- 0:00:01 --:--:-- 795k<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    20/tcp closed ftp-data<br>
+    21/tcp open ftp<br>
+    22/tcp open ssh<br>
+    25/tcp closed smtp<br>
+    53/tcp closed domain<br>
+    80/tcp open http<br>
+    143/tcp closed imap<br>
+    443/tcp closed https<br>
+    3128/tcp open squid-http<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo dnf install httpd-tools<br>
+    [tuser@kvmcentos ~]$ sudo touch /etc/squid/passwd<br>
+    [tuser@kvmcentos ~]$ sudo chown squid /etc/squid/passwd<br>
+    [tuser@kvmcentos ~]$ sudo htpasswd /etc/squid/passwd proxyuser<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/squid/squid.conf<br>
+    [tuser@kvmcentos ~]$ cat /etc/squid/squid.conf<br>
+    #acl localnet src tipcentos<br>
+    #acl localnet src tip.0/32<br>
+    #acl Safe_ports port 80<br>
+    #acl Safe_ports port 443<br>
+    #cache_dir ufs /var/spool/squid 1000 16 256<br>
+    #http_access allow localnet<br>
+    http_port 3128&nbsp;<br>
+    auth_param basic program /usr/lib64/squid/basic_ncsa_auth /etc/squid/passwd<br>
+    auth_param basic children 5<br>
+    auth_param basic realm Squid Basic Authentication<br>
+    auth_param basic credentialsttl 2 hours<br>
+    acl auth_users proxy_auth REQUIRED<br>
+    http_access allow auth_users<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart squid<br>
+    [tuser@kvmcentos ~]$ sudo curl -O -L "https://www.redhat.com/index.html" -x "proxyuser:tpassword@tipcentos:3128"<br>
+    % Total % Received % Xferd Average Speed Time Time Time Current<br>
+    &nbsp;&nbsp;&nbsp;&nbsp; Dload Upload Total Spent Left Speed<br>
+    0 0 0 0 0 0 0 0 --:--:-- --:--:-- --:--:-- 0<br>
+    100 156k 0 156k 0 0 124k 0 --:--:-- 0:00:01 --:--:-- 562k<br>
+    <strong>Source:</strong><br>
+    # https://support.mozilla.org/ru/kb/parametry-soedineniya-v-firefox<br>
+    # https://techviewleo.com/configure-squid-proxy-on-centos-almalinux-rhel/<br>
+    <strong>Task:</strong><br>
+    Настройка Proxy-сервера. Перенаправление пакетов, идущих на 80-й порт, на стандартный порт прокси-сервера.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo iptables -t nat -A PREROUTING -s tip.0 -p tcp --dport 80 -j REDIRECT --to-port 3128<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables.service<br>
+    <strong>Task:</strong><br>
+    Настройка Proxy-сервера. Предоставляем доступ из Интернет к веб-серверу, который расположен в локальной сети (проброс порта). Вместо tipubuntu укажите IP-адрес вашего веб-сервера.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination tipubuntu:80<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables.service<br>
+    <strong>Task:</strong><br>
+    Настройка Proxy-сервера. Включаем маскарадинг для доступа в Интернет пользователей локальной сети.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo iptables -t nat -A POSTROUTING -o enp1s0 -s tip.0/32 -j MASQUERADE<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables.service<br>
+    <strong>Task:</strong><br>
+    Сканирование сети Nmap. Обнаружим активные устройства в сети.<br>
+    <strong>Decision:</strong><br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo apt install nmap<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap -sL tipcentos/24<br>
+    ...<br>
+    Nmap scan report for KvmKali (tipkali)<br>
+    ...<br>
+    Nmap scan report for kvmcentos (tipcentos)<br>
+    ...<br>
+    Nmap scan report for kvmubuntu (tipubuntu)<br>
+    ...<br>
+    <strong>Task:</strong><br>
+    Сканирование сети Nmap. Просканируем хост и проанализируем порт ftp. В некоторых случаях можно вытащить логин и пароль. Такое происходит, когда используются параметры входа по умолчанию.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo nmap -sV tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE VERSION<br>
+    21/tcp open ftp vsftpd 3.0.5<br>
+    22/tcp open ssh OpenSSH 8.7 (protocol 2.0)<br>
+    80/tcp open http nginx 1.22.1<br>
+    3128/tcp open http-proxy Squid http proxy 5.5<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo nmap -sC tipcentos -p 21<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    21/tcp open ftp<br>
+    ...<br>
+    $ find /usr/share/nmap/scripts/ -name '*.nse' | grep ftp<br>
+    ...<br>
+    /usr/share/nmap/scripts/ftp-brute.nse<br>
+    ...<br>
+    $ sudo nmap --script-help ftp-brute.nse<br>
+    ...<br>
+    Performs brute force password auditing against FTP servers.<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo nmap --script ftp-brute.nse tipcentos -p 21<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    21/tcp open ftp<br>
+    | ftp-brute:&nbsp;<br>
+    | Accounts: No valid accounts found<br>
+    | Statistics: Performed 324 guesses in 642 seconds, average tps: 7.5<br>
+    |_ ERROR: The service seems to have failed or is heavily firewalled...<br>
+    ...<br>
+    <strong>Task:</strong><br>
+    Сканируем диапазон портов<br>
+    <strong>Decision:</strong><br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap -sT -p 21-80 tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    21/tcp open ftp<br>
+    22/tcp open ssh<br>
+    25/tcp closed smtp<br>
+    53/tcp closed domain<br>
+    ...<br>
+    <strong>Task:</strong><br>
+    Сканирование сети Nmap. Просканируем удаленный хост (агрессивный режим).<br>
+    <strong>Decision:</strong><br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap -A -T4 tipcentos<br>
+    ...<br>
+    PORT STATE SERVICE VERSION<br>
+    20/tcp closed ftp-data<br>
+    21/tcp open ftp vsftpd 3.0.5<br>
+    22/tcp open ssh OpenSSH 8.7 (protocol 2.0)<br>
+    25/tcp closed smtp<br>
+    53/tcp closed domain<br>
+    143/tcp closed imap<br>
+    443/tcp closed https<br>
+    3128/tcp open http-proxy Squid http proxy 5.5<br>
+    |_http-server-header: squid/5.5<br>
+    |_http-title: ERROR: The requested URL could not be retrieved<br>
+    MAC Address: 52:54:00:7e:05:15 (QEMU virtual NIC)<br>
+    Aggressive OS guesses: Linux 2.6.32 - 3.13 (94%), Linux 2.6.22 - 2.6.36 (92%), Linux 3.10 (92%), Linux 3.10 - 4.11 (92%), Linux 2.6.39 (92%), Linux 2.6.32 (91%), Linux 3.2 - 4.9 (91%), Linux 2.6.32 - 3.10 (91%), Linux 2.6.18 (90%), Linux 3.16 - 4.6 (90%)<br>
+    No exact OS matches for host (test conditions non-ideal).<br>
+    Network Distance: 1 hop<br>
+    Service Info: OS: Unix<br>
+    TRACEROUTE<br>
+    HOP RTT ADDRESS<br>
+    1 0.83 ms tipcentos<br>
+    OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .<br>
+    Nmap done: 1 IP address (1 host up) scanned in 24.18 seconds<br>
+    <strong>Source:</strong><br>
+    # https://losst.ru/kak-polzovatsya-nmap-dlya-skanirovaniya-seti<br>
+    <strong>Task:</strong><br>
+    Перехват трафиков в Tcpdump. Перехватываем DNS-трафик между сервером и каким-нибудь узлом в сети.<br>
+    <strong>Decision:</strong><br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ sudo nmap tipwindows12<br>
+    ...<br>
+    PORT STATE SERVICE<br>
+    53/tcp open domain<br>
+    80/tcp open http<br>
+    443/tcp open https<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -i enp1s0 -n -nn -ttt 'host tipwindows12 and port 53'<br>
+    <strong>Task:</strong><br>
+    Перехват трафиков в Tcpdump. Перехватываем весь трафик для MAC-адреса 52:54:00:7e:05:15 на сетевом интерфейсе enp1s0.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ ifconfig<br>
+    enp1s0: flags=4163&lt;UP,BROADCAST,RUNNING,MULTICAST&gt; mtu 1500<br>
+    ...<br>
+    ether 52:54:00:7e:05:15 txqueuelen 1000 (Ethernet)<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -n -i enp1s0 "ether host 52:54:00:7e:05:15"<br>
+    ...<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ ssh tuser@tipcentos<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -n -i enp1s0 "ether host 52:54:00:7e:05:15"<br>
+    ...<br>
+    00:11:12.536934 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3730, win 501, options [nop,nop,TS val 3107339434 ecr 2462889902], length 0<br>
+    00:11:12.586762 IP tipubuntu.22 &gt; tipcentos.58598: Flags [P.], seq 3730:3782, ack 2242, win 501, options [nop,nop,TS val 2462889993 ecr 3107339434], length 52<br>
+    00:11:12.586838 IP tipubuntu.22 &gt; tipcentos.58598: Flags [P.], seq 3782:3898, ack 2242, win 501, options [nop,nop,TS val 2462889993 ecr 3107339434], length 116<br>
+    00:11:12.588205 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3782, win 501, options [nop,nop,TS val 3107339485 ecr 2462889993], length 0<br>
+    00:11:12.588207 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3898, win 501, options [nop,nop,TS val 3107339486 ecr 2462889993], length 0<br>
+    <strong>Task:</strong><br>
+    Перехват трафиков в Tcpdump. Перехватываем только ICMP-пакеты<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -i enp1s0 -n -nn -ttt 'ip proto \icmp'<br>
+    ...<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ ping tipcentos<br>
+    ...<br>
+    64 bytes from tipcentos: icmp_seq=1 ttl=64 time=0.692 ms<br>
+    64 bytes from tipcentos: icmp_seq=2 ttl=64 time=0.764 ms<br>
+    64 bytes from tipcentos: icmp_seq=3 ttl=64 time=0.868 ms<br>
+    64 bytes from tipcentos: icmp_seq=4 ttl=64 time=1.01 ms<br>
+    64 bytes from tipcentos: icmp_seq=5 ttl=64 time=1.13 ms<br>
+    ^C<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -i enp1s0 -n -nn -ttt 'ip proto \icmp'<br>
+    ...<br>
+    00:00:00.000000 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 1, length 64<br>
+    00:00:00.000171 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 1, length 64<br>
+    00:00:01.001145 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 2, length 64<br>
+    00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 2, length 64<br>
+    00:00:01.001365 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 3, length 64<br>
+    00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 3, length 64<br>
+    00:00:01.001375 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 4, length 64<br>
+    00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 4, length 64<br>
+    00:00:01.001573 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 5, length 64<br>
+    00:00:00.000125 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 5, length 64<br>
+    <strong>Task:</strong><br>
+    Перехват трафиков в Tcpdump. Перехватываем входящий трафик на порт 80. сохраняем статистику в файл my.log для первых 500 пакетов. Будет создан бинарный файл my.log, который можно отпарсить с помощью команды<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -v -i enp1s0 dst port 80<br>
+    ...<br>
+    ┌──(tuser㉿KvmKali)-[~]<br>
+    └─$ firefox tipcentos:80<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -v -i enp1s0 dst port 80<br>
+    ...<br>
+    14:07:24.835633 IP (tos 0x0, ttl 64, id 15549, offset 0, flags [DF], proto TCP (6), length 60)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [S], cksum 0x76d1 (incorrect -&gt; 0x9a90), seq 1076682845, win 64240, options [mss 1460,sackOK,TS val 3110711737 ecr 0,nop,wscale 7], length 0<br>
+    14:07:24.836511 IP (tos 0x0, ttl 64, id 15550, offset 0, flags [DF], proto TCP (6), length 52)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x51b3), ack 2952605173, win 502, options [nop,nop,TS val 3110711738 ecr 3247231251], length 0<br>
+    14:07:24.836838 IP (tos 0x0, ttl 64, id 15551, offset 0, flags [DF], proto TCP (6), length 412)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [P.], cksum 0x7831 (incorrect -&gt; 0xb0a2), seq 0:360, ack 1, win 502, options [nop,nop,TS val 3110711739 ecr 3247231251], length 360: HTTP, length: 360<br>
+    GET / HTTP/1.1<br>
+    Host: tipubuntu<br>
+    User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0<br>
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8<br>
+    Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3<br>
+    Accept-Encoding: gzip, deflate<br>
+    Connection: keep-alive<br>
+    Upgrade-Insecure-Requests: 1<br>
+    14:07:24.844920 IP (tos 0x0, ttl 64, id 15552, offset 0, flags [DF], proto TCP (6), length 52)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x4285), ack 3522, win 489, options [nop,nop,TS val 3110711747 ecr 3247231260], length 0<br>
+    14:07:29.846014 IP (tos 0x0, ttl 64, id 15553, offset 0, flags [DF], proto TCP (6), length 52)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [F.], cksum 0x76c9 (incorrect -&gt; 0x2eef), seq 360, ack 3522, win 501, options [nop,nop,TS val 3110716748 ecr 3247231260], length 0<br>
+    14:07:29.846795 IP (tos 0x0, ttl 64, id 15554, offset 0, flags [DF], proto TCP (6), length 52)<br>
+    kvmcentos.45022 &gt; kvmubuntu.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x1b63), ack 3523, win 501, options [nop,nop,TS val 3110716749 ecr 3247236262], length 0<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -v -n -w my.log dst port 80 -c 500<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ ls my.log<br>
+    my.log<br>
+    [tuser@kvmcentos ~]$ sudo tcpdump -nr my.log | awk '{print $3}' | grep -oE '[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}' | sort | uniq -c | sort -rn<br>
+    reading from file my.log, link-type EN10MB (Ethernet), snapshot length 262144<br>
+    dropped privs to tcpdump<br>
+    6 tipkali<br>
+    <strong>Task:</strong><br>
+    Блокировка подозрительных IP-адресов. IP-адреса, которые вызывают подозрение, можно заблокировать в iptables с помощью команды, указанной ниже.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo iptables -A INPUT -s tipkali -j DROP<br>
+    [tuser@kvmcentos ~]$ sudo service iptables save<br>
+    [tuser@kvmcentos ~]$ sudo systemctl restart iptables.service<br>
+    <strong>Task:</strong><br>
+    Безопасность сервера. Установка и настройка tripwire.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo dnf -y install epel-releasey<br>
+    [tuser@kvmcentos ~]$ sudo dnf -y install tripwire<br>
+    [tuser@kvmcentos ~]$ sudo tripwire-setup-keyfiles<br>
+    [tuser@kvmcentos ~]$ sudo tripwire --init<br>
+    ...<br>
+    ### Warning: File system error.<br>
+    ### Filename: /proc/pci<br>
+    ### Нет такого файла или каталога<br>
+    ### Continuing...<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/tripwire/twpol.txt<br>
+    ...<br>
+    /proc/pci&nbsp;&nbsp; -&gt; $(Device) ;<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/tripwire/twpol.txt<br>
+    [tuser@kvmcentos ~]$ sudo cat /etc/tripwire/twpol.txt<br>
+    ...<br>
+    #/proc/pci&nbsp;&nbsp; -&gt; $(Device) ;<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo tripwire --update-policy --secure-mode low /etc/tripwire/twpol.txt<br>
+    [tuser@kvmcentos ~]$ sudo tripwire --check —interactive<br>
+    <strong>Task:</strong><br>
+    Безопасность сервера. Создаем конфигурацию, Создаем базу данных.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ ls /etc/tripwire/<br>
+    centos-local.key site.key tw.cfg twcfg.txt tw.pol tw.pol.bak twpol.txt<br>
+    [tuser@kvmcentos ~]$ sudo twadmin -m F -c /etc/tripwire/tw.cfg -S /etc/tripwire/site.key /etc/tripwire/twcfg.txt<br>
+    [tuser@kvmcentos ~]$ sudo vim /etc/tripwire/twpolmake.pl<br>
+    [tuser@kvmcentos ~]$ cat /etc/tripwire/twpolmake.pl<br>
+    #!/usr/bin/perl<br>
+    # Tripwire Policy File customize tool<br>
+    # ----------------------------------------------------------------<br>
+    # Copyright (C) 2003 Hiroaki Izumi<br>
+    # This program is free software; you can redistribute it and/or<br>
+    # modify it under the terms of the GNU General Public License<br>
+    # as published by the Free Software Foundation; either version 2<br>
+    # of the License, or (at your option) any later version.<br>
+    # This program is distributed in the hope that it will be useful,<br>
+    # but WITHOUT ANY WARRANTY; without even the implied warranty of<br>
+    # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the<br>
+    # GNU General Public License for more details.<br>
+    # You should have received a copy of the GNU General Public License<br>
+    # along with this program; if not, write to the Free Software<br>
+    # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.<br>
+    # ----------------------------------------------------------------<br>
+    # Usage:<br>
+    # perl twpolmake.pl {Pol file}<br>
+    # ----------------------------------------------------------------<br>
+    #<br>
+    $POLFILE=$ARGV[0];<br>
+    open(POL,"$POLFILE") or die "open error: $POLFILE" ;<br>
+    my($myhost,$thost) ;<br>
+    my($sharp,$tpath,$cond) ;<br>
+    my($INRULE) = 0 ;<br>
+    while (&lt;POL&gt;) {<br>
+    chomp;<br>
+    if (($thost) = /^HOSTNAME\s*=\s*(.*)\s*;/) {<br>
+    $myhost = `hostname` ; chomp($myhost) ;<br>
+    if ($thost ne $myhost) {<br>
+    $_="HOSTNAME=\"$myhost\";" ;<br>
+    }<br>
+    }<br>
+    elsif ( /^{/ ) {<br>
+    $INRULE=1 ;<br>
+    }<br>
+    elsif ( /^}/ ) {<br>
+    $INRULE=0 ;<br>
+    }<br>
+    elsif ($INRULE == 1 and ($sharp,$tpath,$cond) = /^(\s*\#?\s*)(\/\S+)\b(\s+-&gt;\s+.+)$/) {<br>
+    $ret = ($sharp =~ s/\#//g) ;<br>
+    if ($tpath eq '/sbin/e2fsadm' ) {<br>
+    $cond =~ s/;\s+(tune2fs.*)$/; \#$1/ ;<br>
+    }<br>
+    if (! -s $tpath) {<br>
+    $_ = "$sharp#$tpath$cond" if ($ret == 0) ;<br>
+    }<br>
+    else {<br>
+    $_ = "$sharp$tpath$cond" ;<br>
+    }<br>
+    }<br>
+    print "$_\n" ;<br>
+    }<br>
+    close(POL) ;<br>
+    [tuser@kvmcentos ~]$ sudo perl /etc/tripwire/twpolmake.pl /etc/tripwire/twpol.txt &gt; /etc/tripwire/twpol.txt.new&nbsp;<br>
+    [tuser@kvmcentos ~]$ sudo twadmin -m P -c /etc/tripwire/tw.cfg -p /etc/tripwire/tw.pol -S /etc/tripwire/site.key /etc/tripwire/twpol.txt.new<br>
+    [tuser@kvmcentos ~]$ sudo tripwire -m i -s -c /etc/tripwire/tw.cfg<br>
+    [tuser@kvmcentos ~]$ sudo tripwire -m c -s -c /etc/tripwire/tw.cfg<br>
+    Open Source Tripwire(R) 2.4.3.7 Integrity Check Report<br>
+    Report generated by: root<br>
+    Report created on: Вс 29 окт 2023 14:26:04<br>
+    Database last updated on: Never<br>
+    ...<br>
+    ===============================================================================<br>
+    Object Summary:&nbsp;<br>
+    ===============================================================================<br>
+    -------------------------------------------------------------------------------<br>
+    # Section: Unix File System<br>
+    -------------------------------------------------------------------------------<br>
+    No violations.<br>
+    ===============================================================================<br>
+    Error Report:&nbsp;<br>
+    ===============================================================================<br>
+    ...<br>
+    [tuser@kvmcentos ~]$ sudo ls /var/lib/tripwire/report<br>
+    итого 28<br>
+    -rw-r--r--. 1 root root 350 окт 29 13:55 centos-20231029-135511.twr<br>
+    -rw-r--r--. 1 root root 350 окт 29 13:57 centos-20231029-135712.twr<br>
+    -rw-r--r--. 1 root root 350 окт 29 14:00 centos-20231029-140029.twr<br>
+    -rw-r--r--. 1 root root 350 окт 29 14:08 centos-20231029-140853.twr<br>
+    -rw-r--r--. 1 root root 350 окт 29 14:09 centos-20231029-140919.twr<br>
+    -rw-r--r--. 1 root root 6446 окт 29 14:27 centos-20231029-142604.twr<br>
+    <strong>Task:</strong><br>
+    Безопасность сервера. Проверим на работоспособность утилиты Tripwire. Создав файл в системе, утилита должна показать, что добавлен был файл.<br>
+    <strong>Decision:</strong><br>
+    [tuser@kvmcentos ~]$ sudo touch /var/lib/tripwire/tfile3.txt<br>
+    [tuser@kvmcentos ~]$ sudo tripwire -m c -s -c /etc/tripwire/tw.cfg<br>
+    Open Source Tripwire(R) 2.4.3.7 Integrity Check Report<br>
+    ...<br>
+    -------------------------------------------------------------------------------<br>
+    Rule Name: Tripwire Data Files (/var/lib/tripwire)<br>
+    Severity Level: 100<br>
+    -------------------------------------------------------------------------------<br>
+    Added:<br>
+    "/var/lib/tripwire/tfile3.txt"<br>
+    ===============================================================================<br>
+    Error Report:&nbsp;<br>
+    ===============================================================================<br>
+    ...<br>
+    <strong>Source:</strong><br>
+    # https://linux-notes.org/ustanovka-i-nastrojka-tripwire-v-centos-redhat-fedora/?ysclid=loazeq8vjc96566460&nbsp;<br>
+    # https://www.server-world.info/en/note?os=CentOS_7&amp;p=tripwire<br>
+    # https://www.lisenet.com/2017/configure-tripwire-on-centos-7/
 </p>
-<ul>
-    <li>
-        Разворачивание несколько виртуальных машин с разными дистрибутивами.
-    </li>
-    <li>
-        Настройка правил в Iptables, Ftp сервер, Веб сервер Nginx, Squid Proxy.
-    </li>
-    <li>
-        Сканирование сети, хостов и портов.
-    </li>
-    <li>
-        Перехват трафиков утилитой Tcpdump сетевых интерфейсов, Icmp пакетов, Dns трафик между сервером и хостом, входящий трафик на порт 80.
-    </li>
-    <li>
-        Настройка мониторинга системы утилитой Tripwire, поиск руткитов утилитой Rkhunter и расписание, которое Rkhunter выгружал отчет о состоянии системы.
-    </li>
-    <li>
-        Сравнение образа раздела или файла перед взломом с образом из взломанной системы.
-    </li>
-</ul>
-<p>
-    Безопасность веб-сервера Портфолио.
-</p>
-<ul>
-    <li>
-        Настройка Sftp сервера, Rkhunter.
-    </li>
-    <li>
-        Анализ на наличие открытых портов.
-    </li>
-</ul>
-<p><strong>Task:</strong><br>Выводим список текущих правил iptables и проанализируем какие порты открыты в сервере Centos. <br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo yum install iptables-services<br>[tuser1@thost1 ~]$ sudo iptables --version<br>[tuser1@thost1 ~]$ sudo iptables -L -v<br>Chain INPUT (policy ACCEPT 0 packets, 0 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination&nbsp;&nbsp;&nbsp;&nbsp; <br>Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination&nbsp;&nbsp;&nbsp;&nbsp; <br>Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination <br>[tuser1@thost1 ~]$ sudo systemctl start iptables<br>[tuser1@thost1 ~]$ sudo systemctl enable iptables<br>[tuser1@thost1 ~]$ sudo service iptables status<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap tipcentos<br>Starting Nmap 7.80 ( https://nmap.org ) at 2023-10-17 08:33 CDT<br>Nmap scan report for centos (tipcentos)<br>Host is up (0.00089s latency).<br>Not shown: 999 filtered ports<br>PORT   STATE SERVICE<br>22/tcp open  ssh<br>MAC Address: tmaccentos (QEMU virtual NIC)<br>Nmap done: 1 IP address (1 host up) scanned in 5.30 seconds<br><strong>Task:</strong><br>В сервере Centos Напишем набор правил iptables, в котором мы разрешаем все исходящие соединения и строго ограничиваем входящие. <br>Доступ будет возможен по портам TCP: 21, 22, 25, 53, 80, 143, 443, по портам UDP: 20, 21, 53, также мы пропускаем пакеты для уже установленных соединений.<br>С удаленной машины просканируем порты на нашем сервере.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo vim firewall.sh<br>[tuser1@thost1 ~]$ sudo cat firewall.sh<br>#!/bin/bash<br>IPT="/sbin/iptables"<br># Очищаем правила и удаляем цепочки.<br>$IPT -F<br>$IPT -X<br># По умолчанию доступ запрещен.<br>$IPT -P INPUT DROP<br>$IPT -P FORWARD DROP<br>$IPT -P OUTPUT DROP<br># Список разрешенных TCP и UDP портов.<br>TCP_PORTS="21,22,25,53,80,143,443"<br>UDP_PORTS="53,21,20"<br># Разрешаем пакеты для интерфейса обратной петли.<br>$IPT -A INPUT -i lo -j ACCEPT<br>$IPT -A OUTPUT -o lo -j ACCEPT<br># Разрешаем пакеты для установленных соединений.<br>$IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT<br># Разрешаем исходящие соединения.<br>$IPT -A OUTPUT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT<br># Разрешаем доступ к портам, описанным в переменных TCP_PORTS и UDP_PORTS.<br>$IPT -A INPUT -p tcp -m multiport --dport $TCP_PORTS -j ACCEPT<br>$IPT -A INPUT -p udp -m multiport --dport $UDP_PORTS -j ACCEPT<br># Разрешаем исходящий ping.<br>$IPT -A INPUT -p icmp -m icmp --icmp-type echo-reply -j ACCEPT<br>[tuser1@thost1 ~]$ sudo chmod +x firewall.sh<br>[tuser1@thost1 ~]$ sudo ./firewall.sh<br>[tuser1@thost1 ~]$ sudo iptables -L -v<br>Chain INPUT (policy DROP 1986 packets, 87384 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination&nbsp;&nbsp;&nbsp;&nbsp; <br>&nbsp;&nbsp;0&nbsp;&nbsp; 0 ACCEPT&nbsp;&nbsp; all  --  lo&nbsp;&nbsp; any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br>   79  5604 ACCEPT&nbsp;&nbsp; all  --  any&nbsp;&nbsp;any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; state RELATED,ESTABLISHED<br>&nbsp;&nbsp;9   396 ACCEPT&nbsp;&nbsp; tcp  --  any&nbsp;&nbsp;any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; multiport dports ftp,ssh,smtp,domain,http,imap,https<br>&nbsp;&nbsp;0&nbsp;&nbsp; 0 ACCEPT&nbsp;&nbsp; udp  --  any&nbsp;&nbsp;any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; multiport dports domain,ftp,ftp-data<br>&nbsp;&nbsp;0&nbsp;&nbsp; 0 ACCEPT&nbsp;&nbsp; icmp --  any&nbsp;&nbsp;any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; icmp echo-reply<br>Chain FORWARD (policy DROP 0 packets, 0 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination&nbsp;&nbsp;&nbsp;&nbsp; <br>Chain OUTPUT (policy DROP 0 packets, 0 bytes)<br> pkts bytes target&nbsp;&nbsp; prot opt in&nbsp;&nbsp; out&nbsp;&nbsp; source&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   destination&nbsp;&nbsp;&nbsp;&nbsp; <br>&nbsp;&nbsp;0&nbsp;&nbsp; 0 ACCEPT&nbsp;&nbsp; all  --  any&nbsp;&nbsp;lo&nbsp;&nbsp;  anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br>   60  7920 ACCEPT&nbsp;&nbsp; all  --  any&nbsp;&nbsp;any&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; anywhere&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; state NEW,RELATED,ESTABLISHED<br>[tuser1@thost1 ~]$ sudo service iptables save<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap tipcentos<br>...<br>PORT&nbsp;&nbsp;STATE  SERVICE<br>21/tcp  closed ftp<br>22/tcp  open   ssh<br>25/tcp  closed smtp<br>53/tcp  closed domain<br>80/tcp  closed http<br>143/tcp closed imap<br>443/tcp closed https<br>...<br><strong>Task:</strong><br>Если сетевых интерфейсов два или более, то необходимо включить перенаправление трафика и перечитать конфигурационный файл<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo vim /etc/sysctl.conf<br>[tuser1@thost1 ~]$ sudo cat /etc/sysctl.conf<br>...<br>net.ipv4.ip_forward = 1<br>[tuser1@thost1 ~]$ sudo sysctl -p /etc/sysctl.conf<br>net.ipv4.ip_forward = 1<br><strong>Source:</strong><br>https://blog.sedicomm.com/2016/12/16/iptables-ustanovka-i-nastrojka/?ysclid=ln3wplng53988958006#1<br><strong>Task:</strong><br>Install and configure an FTP server. Securing the connection to the FTP server.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo dnf update -y<br>[tuser1@thost1 ~]$ sudo dnf install vsftpd -y<br>[tuser1@thost1 ~]$ sudo systemctl enable vsftpd --now<br>[tuser1@thost1 ~]$ sudo systemctl status vsftpd<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap tipcentos<br>...<br>PORT&nbsp;&nbsp;STATE  SERVICE<br>21/tcp  open   ftp<br>22/tcp  open   ssh<br>25/tcp  closed smtp<br>53/tcp  closed domain<br>80/tcp  closed http<br>143/tcp closed imap<br>443/tcp closed https<br>...<br>[tuser1@thost1 ~]$ sudo useradd -m -d "/home/ftpuser" ftpuser<br>[tuser1@thost1 ~]$ sudo passwd ftpuser<br>[tuser1@thost1 ~]$ sudo mkdir -p /home/ftpuser/shared<br>[tuser1@thost1 ~]$ sudo chmod -R 750 /home/ftpuser/shared<br>[tuser1@thost1 ~]$ sudo chown ftpuser: /home/ftpuser/shared<br>[tuser1@thost1 ~]$ sudo vim /etc/vsftpd/user_list<br>[tuser1@thost1 ~]$ sudo cat /etc/vsftpd/user_list | grep ftp<br>ftpuser<br>[tuser1@thost1 ~]$ sudo vim /etc/vsftpd/vsftpd.conf<br>[tuser1@thost1 ~]$ sudo cat /etc/vsftpd/vsftpd.conf<br>...<br>anonymous_enable=NO<br>...<br>local_enable=YES<br>...<br>write_enable=YES<br>...<br>chroot_local_user=YES<br>...<br>allow_writeable_chroot=YES<br>pasv_min_port=31500<br>pasv_max_port=32500<br>userlist_file=/etc/vsftpd/user_list<br>userlist_deny=NO<br>[tuser1@thost1 ~]$ sudo systemctl restart vsftpd<br>[tuser1@thost1 ~]$ sudo openssl req -x509 -nodes -days 3650 \<br>-newkey rsa:2048 -keyout /etc/vsftpd.pem \<br>-out /etc/vsftpd/vsftpd.pem<br>[tuser1@thost1 ~]$ sudo vim /etc/vsftpd/vsftpd.conf<br>[tuser1@thost1 ~]$ sudo cat /etc/vsftpd/vsftpd.conf<br>...<br>#rsa_cert_file=/etc/vsftpd/vsftpd.pem<br>#rsa_private_key_file=/etc/vsftpd.pem<br>#ssl_enable=YES<br>[tuser1@thost1 ~]$ sudo systemctl restart vsftpd<br>[tuser1@thost1 ~]$ sudo cat /etc/sysconfig/iptables<br># Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>*mangle<br>:PREROUTING ACCEPT [45:3316]<br>:INPUT ACCEPT [45:3316]<br>:FORWARD ACCEPT [0:0]<br>:OUTPUT ACCEPT [34:5048]<br>:POSTROUTING ACCEPT [34:5048]<br>COMMIT<br># Completed on Sun Oct 22 12:10:33 2023<br># Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>*raw<br>:PREROUTING ACCEPT [45:3316]<br>:OUTPUT ACCEPT [34:5048]<br>COMMIT<br># Completed on Sun Oct 22 12:10:33 2023<br># Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>*filter<br>:INPUT DROP [0:0]<br>:FORWARD DROP [0:0]<br>:OUTPUT DROP [0:0]<br>-A INPUT -i lo -j ACCEPT<br>-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT<br>-A INPUT -p tcp -m multiport --dports 21,22,25,53,80,143,443 -j ACCEPT<br>-A INPUT -p udp -m multiport --dports 53,21,20 -j ACCEPT<br>-A INPUT -p icmp -m icmp --icmp-type 0 -j ACCEPT<br>-A OUTPUT -o lo -j ACCEPT<br>-A OUTPUT -m state --state NEW,RELATED,ESTABLISHED -j ACCEPT<br>COMMIT<br># Completed on Sun Oct 22 12:10:33 2023<br># Generated by iptables-save v1.8.8 (nf_tables) on Sun Oct 22 12:10:33 2023<br>*nat<br>:PREROUTING ACCEPT [0:0]<br>:INPUT ACCEPT [0:0]<br>:OUTPUT ACCEPT [0:0]<br>:POSTROUTING ACCEPT [0:0]<br>COMMIT<br># Completed on Sun Oct 22 12:10:33 2023<br>[tuser1@thost1 ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 20:21 -j ACCEPT<br>[tuser1@thost1 ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 31500:32500 -j ACCEPT<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables<br>┌──(tuser2㉿thost2)-[~]<br>└─$ telnet tipcentos 21<br>Trying tipcentos...<br>Connected to tipcentos.<br>Escape character is '^]'.<br>220 (vsFTPd 3.0.5)<br>USER ftpuser<br>331 Please specify the password.<br>PASS tpassword<br>230 Login successful.<br>PWD<br>257 "/" is the current directory<br>PASV<br>227 Entering Passive Mode (I,P,126,61).<br>┌──(tuser2㉿thost2)-[~]<br>└─$ 126*256+61<br>32317<br>┌──(tuser2㉿thost2)-[~]<br>└─$ telnet tipcentos 32317<br>Trying tipcentos...<br>Connected to tipcentos.<br>Escape character is '^]'.<br>LIST<br>150 Here comes the directory listing.<br>226 Directory send OK.<br>drwxr-x---&nbsp;&nbsp;2 1001&nbsp;&nbsp; 1001&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6 Oct 21 03:06 shared<br>QUIT<br>221 Goodbye.<br><strong>Task:</strong><br>Запрещаем доступ к фтп всем пользователям, кроме пользователя с MAC-адресом tmacubuntu.<br><strong>Decision:</strong><br>tuser3@thost3:~$ ifconfig | grep tmacubuntu<br>&nbsp;&nbsp;&nbsp;&nbsp;ether tmacubuntu  txqueuelen 1000  (Ethernet)<br>[tuser1@thost1 ~]$ sudo iptables -I INPUT -p tcp --dport 21 -m mac ! --mac-source tmacubuntu -j REJECT<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables<br>tuser3@thost3:~$ ftp tipcentos<br>Connected to tipcentos.<br>220 (vsFTPd 3.0.5)<br>Name (tipcentos:user): ftpuser<br>331 Please specify the password.<br>Password: <br>230 Login successful.<br>Remote system type is UNIX.<br>Using binary mode to transfer files.<br>ftp&gt; ls<br>229 Entering Extended Passive Mode (|||31695|)<br>150 Here comes the directory listing.<br>drwxr-x---&nbsp;&nbsp;2 1001&nbsp;&nbsp; 1001&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;6 Oct 21 03:06 shared<br>226 Directory send OK.<br>ftp&gt; exit<br>221 Goodbye.<br>┌──(tuser2㉿thost2)-[~]<br>└─$ ftp tipcentos<br>ftp: Can't connect to `tipcentos:21': Connection refused<br>ftp: Can't connect to `tipcentos:ftp'<br>ftp&gt; exit<br>┌──(tuser2㉿thost2)-[~]<br>└─$ telnet tipcentos 21 <br>Trying tipcentos...<br>telnet: Unable to connect to remote host: Connection refused<br><strong>Source:</strong><br>https://unixcop.com/how-to-install-and-configure-an-ftp-server-on-centos-9-stream/<br>https://losst.pro/kak-otkryt-port-iptables?ysclid=lnvrpgxwj8175390861<br>https://techviewleo.com/configure-vsftpd-ftp-server-on-ubuntu-linux/<br>https://stackoverflow.com/questions/38523250/vsftpd-login-is-not-successful<br><strong>Task:</strong><br>Install Nginx<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo dnf update -y<br>[tuser1@thost1 ~]$ sudo dnf install nginx<br>[tuser1@thost1 ~]$ sudo systemctl start nginx<br>[tuser1@thost1 ~]$ sudo systemctl enable nginx<br>[tuser1@thost1 ~]$ nginx -v<br>[tuser1@thost1 ~]$ firefox http://tipcentos:80/<br><strong>Source:</strong><br>https://devcoops.com/install-nginx-on-centos-9-stream/<br><strong>Task:</strong><br>Configure Squid Proxy Kali<br><strong>Decision:</strong><br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo apt update<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo apt install squid<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo systemctl start squid<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo systemctl enable squid<br>┌──(tuser2㉿thost2)-[~]<br>└─$ grep -Eiv '(^#|^$)' /etc/squid/squid.conf<br>acl localnet src 0.0.0.1-0.255.255.255  # RFC 1122 "this" network (LAN)<br>acl localnet src 10.0.0.0/8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # RFC 1918 local private network (LAN)<br>acl localnet src 100.64.0.0/10&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 6598 shared address space (CGN)<br>acl localnet src 169.254.0.0/16&nbsp;&nbsp;&nbsp;&nbsp; # RFC 3927 link-local (directly plugged) machines<br>acl localnet src 172.16.0.0/12&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 1918 local private network (LAN)<br>acl localnet src 192.168.0.0/16&nbsp;&nbsp;&nbsp;&nbsp; # RFC 1918 local private network (LAN)<br>acl localnet src fc00::/7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   # RFC 4193 local private network range<br>acl localnet src fe80::/10&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 4291 link-local (directly plugged) machines<br>acl SSL_ports port 443<br>acl Safe_ports port 80&nbsp;&nbsp;&nbsp;&nbsp;  # http<br>acl Safe_ports port 21&nbsp;&nbsp;&nbsp;&nbsp;  # ftp<br>acl Safe_ports port 443&nbsp;&nbsp;&nbsp;&nbsp; # https<br>acl Safe_ports port 70&nbsp;&nbsp;&nbsp;&nbsp;  # gopher<br>acl Safe_ports port 210&nbsp;&nbsp;&nbsp;&nbsp; # wais<br>acl Safe_ports port 1025-65535  # unregistered ports<br>acl Safe_ports port 280&nbsp;&nbsp;&nbsp;&nbsp; # http-mgmt<br>acl Safe_ports port 488&nbsp;&nbsp;&nbsp;&nbsp; # gss-http<br>acl Safe_ports port 591&nbsp;&nbsp;&nbsp;&nbsp; # filemaker<br>acl Safe_ports port 777&nbsp;&nbsp;&nbsp;&nbsp; # multiling http<br>http_access deny !Safe_ports<br>http_access deny CONNECT !SSL_ports<br>http_access allow localhost manager<br>http_access deny manager<br>http_access allow localhost<br>http_access deny to_localhost<br>http_access deny to_linklocal<br>include /etc/squid/conf.d/*.conf<br>http_access deny all<br>http_port 3128<br>coredump_dir /var/spool/squid<br>refresh_pattern ^ftp:&nbsp;&nbsp;&nbsp;&nbsp;   1440&nbsp;&nbsp;20%&nbsp;&nbsp; 10080<br>refresh_pattern -i (/cgi-bin/|\?) 0&nbsp;&nbsp; 0%&nbsp;&nbsp;  0<br>refresh_pattern .&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   0&nbsp;&nbsp;   20%&nbsp;&nbsp; 4320<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo mv /etc/squid/squid.conf /etc/squid/squid.conf.bac<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo vim /etc/squid/squid.conf<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo cat /etc/squid/squid.conf&nbsp;&nbsp;<br>acl localnet src tipkali<br>http_access allow localnet<br>http_port 3128<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo systemctl restart squid   <br>┌──(tuser2㉿thost2)-[~]<br>└─$ cat /var/log/squid/access.log<br>1698153952.395&nbsp;&nbsp;  1 tipkali NONE_NONE/400 3816 - / - HIER_NONE/- text/html<br>1698153953.958&nbsp;&nbsp;  7 tipkali TCP_DENIED/403 4185 GET http://kali:3128/squid-internal-static/icons/SN.png - HIER_NONE/- text/html<br>...<br>1698154905.087&nbsp;&nbsp;  2 tipkali TCP_MISS/400 3889 GET http://tipkali:3128/ - HIER_DIRECT/tipkali text/html<br>1698154906.698&nbsp;&nbsp;149 tipkali TCP_TUNNEL/200 39 CONNECT static.vk.com:443 - HIER_DIRECT/87.240.137.164 -<br>1698154906.796&nbsp;&nbsp;  0 tipkali NONE_NONE/400 3838 - /favicon.ico - HIER_NONE/- text/html<br>1698154906.797&nbsp;&nbsp;  2 tipkali TCP_MISS/400 3911 GET http://tipkali:3128/favicon.ico - HIER_DIRECT/tipkali text/html<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo apt install apache2-utils   <br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo htpasswd -c /etc/squid/passwd user<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo vim /etc/squid/squid.conf&nbsp;&nbsp;&nbsp;&nbsp; <br>┌──(tuser2㉿thost2)-[~]<br>└─$ cat /etc/squid/squid.conf<br>#acl localnet src tipkali<br>#http_access allow localnet<br>http_port 3128<br>via off<br>auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwd<br>auth_param basic children 5<br>auth_param basic credentialsttl 2 hours<br>auth_param basic casesensitive on<br>auth_param basic realm Squid proxy for kali<br>acl auth_users proxy_auth REQUIRED<br>http_access allow auth_users<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo systemctl restart squid<br><strong>Task:</strong><br>Configure Squid Proxy Centos<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo dnf install squid<br>[tuser1@thost1 ~]$ sudo systemctl enable --now squid<br>[tuser1@thost1 ~]$ grep -Eiv '(^#|^$)' /etc/squid/squid.conf<br>acl localnet src 0.0.0.1-0.255.255.255  # RFC 1122 "this" network (LAN)<br>acl localnet src 10.0.0.0/8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # RFC 1918 local private network (LAN)<br>acl localnet src 100.64.0.0/10&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 6598 shared address space (CGN)<br>acl localnet src 169.254.0.0/16&nbsp;&nbsp;&nbsp;&nbsp; # RFC 3927 link-local (directly plugged) machines<br>acl localnet src 172.16.0.0/12&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 1918 local private network (LAN)<br>acl localnet src 192.168.0.0/16&nbsp;&nbsp;&nbsp;&nbsp; # RFC 1918 local private network (LAN)<br>acl localnet src fc00::/7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   # RFC 4193 local private network range<br>acl localnet src fe80::/10&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  # RFC 4291 link-local (directly plugged) machines<br>acl SSL_ports port 443<br>acl Safe_ports port 80&nbsp;&nbsp;&nbsp;&nbsp;  # http<br>acl Safe_ports port 21&nbsp;&nbsp;&nbsp;&nbsp;  # ftp<br>acl Safe_ports port 443&nbsp;&nbsp;&nbsp;&nbsp; # https<br>acl Safe_ports port 70&nbsp;&nbsp;&nbsp;&nbsp;  # gopher<br>acl Safe_ports port 210&nbsp;&nbsp;&nbsp;&nbsp; # wais<br>acl Safe_ports port 1025-65535  # unregistered ports<br>acl Safe_ports port 280&nbsp;&nbsp;&nbsp;&nbsp; # http-mgmt<br>acl Safe_ports port 488&nbsp;&nbsp;&nbsp;&nbsp; # gss-http<br>acl Safe_ports port 591&nbsp;&nbsp;&nbsp;&nbsp; # filemaker<br>acl Safe_ports port 777&nbsp;&nbsp;&nbsp;&nbsp; # multiling http<br>http_access deny !Safe_ports<br>http_access deny CONNECT !SSL_ports<br>http_access allow localhost manager<br>http_access deny manager<br>http_access allow localnet<br>http_access allow localhost<br>http_access deny all<br>http_port 3128<br>coredump_dir /var/spool/squid<br>refresh_pattern ^ftp:&nbsp;&nbsp;&nbsp;&nbsp;   1440&nbsp;&nbsp;20%&nbsp;&nbsp; 10080<br>refresh_pattern ^gopher:&nbsp;&nbsp;&nbsp;&nbsp;1440&nbsp;&nbsp;0%&nbsp;&nbsp;  1440<br>refresh_pattern -i (/cgi-bin/|\?) 0&nbsp;&nbsp; 0%&nbsp;&nbsp;  0<br>refresh_pattern .&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   0&nbsp;&nbsp;   20%&nbsp;&nbsp; 4320<br>[tuser1@thost1 ~]$ sudo mv /etc/squid/squid.conf /etc/squid/squid.conf.bac<br>[tuser1@thost1 ~]$ sudo vim /etc/squid/squid.conf<br>[tuser1@thost1 ~]$ cat /etc/squid/squid.conf<br>acl localnet src tipcentos<br>acl localnet src tip.0/32<br>acl Safe_ports port 80<br>acl Safe_ports port 443<br>cache_dir ufs /var/spool/squid 1000 16 256<br>http_access allow localnet<br>http_port 3128   <br>[tuser1@thost1 ~]$ sudo systemctl restart squid<br>[tuser1@thost1 ~]$ sudo iptables -t filter -A INPUT -p tcp --dport 3128 -j ACCEPT<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables.service<br>[tuser1@thost1 ~]$ sudo curl -O -L "https://www.redhat.com/index.html" -x "tipcentos:3128"<br>  % Total&nbsp;&nbsp;% Received % Xferd  Average Speed   Time&nbsp;&nbsp;Time&nbsp;&nbsp; Time  Current<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Dload  Upload   Total   Spent&nbsp;&nbsp;Left  Speed<br>  0&nbsp;&nbsp; 0&nbsp;&nbsp;0&nbsp;&nbsp; 0&nbsp;&nbsp;0&nbsp;&nbsp; 0&nbsp;&nbsp;  0&nbsp;&nbsp;  0 --:--:-- --:--:-- --:--:--&nbsp;&nbsp; 0<br>100  156k&nbsp;&nbsp;0  156k&nbsp;&nbsp;0&nbsp;&nbsp; 0   147k&nbsp;&nbsp;  0 --:--:--  0:00:01 --:--:--  795k<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap tipcentos<br>...<br>PORT&nbsp;&nbsp; STATE  SERVICE<br>20/tcp   closed ftp-data<br>21/tcp   open   ftp<br>22/tcp   open   ssh<br>25/tcp   closed smtp<br>53/tcp   closed domain<br>80/tcp   open   http<br>143/tcp  closed imap<br>443/tcp  closed https<br>3128/tcp open   squid-http<br>...<br>[tuser1@thost1 ~]$ sudo dnf install httpd-tools<br>[tuser1@thost1 ~]$ sudo touch /etc/squid/passwd<br>[tuser1@thost1 ~]$ sudo chown squid /etc/squid/passwd<br>[tuser1@thost1 ~]$ sudo htpasswd /etc/squid/passwd proxyuser<br>[tuser1@thost1 ~]$ sudo vim /etc/squid/squid.conf<br>[tuser1@thost1 ~]$ cat /etc/squid/squid.conf<br>#acl localnet src tipcentos<br>#acl localnet src tip.0/32<br>#acl Safe_ports port 80<br>#acl Safe_ports port 443<br>#cache_dir ufs /var/spool/squid 1000 16 256<br>#http_access allow localnet<br>http_port 3128   <br>auth_param basic program /usr/lib64/squid/basic_ncsa_auth /etc/squid/passwd<br>auth_param basic children 5<br>auth_param basic realm Squid Basic Authentication<br>auth_param basic credentialsttl 2 hours<br>acl auth_users proxy_auth REQUIRED<br>http_access allow auth_users<br>[tuser1@thost1 ~]$ sudo systemctl restart squid<br>[tuser1@thost1 ~]$ sudo curl -O -L "https://www.redhat.com/index.html" -x "proxyuser:tpassword@tipcentos:3128"<br>  % Total&nbsp;&nbsp;% Received % Xferd  Average Speed   Time&nbsp;&nbsp;Time&nbsp;&nbsp; Time  Current<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Dload  Upload   Total   Spent&nbsp;&nbsp;Left  Speed<br>  0&nbsp;&nbsp; 0&nbsp;&nbsp;0&nbsp;&nbsp; 0&nbsp;&nbsp;0&nbsp;&nbsp; 0&nbsp;&nbsp;  0&nbsp;&nbsp;  0 --:--:-- --:--:-- --:--:--&nbsp;&nbsp; 0<br>100  156k&nbsp;&nbsp;0  156k&nbsp;&nbsp;0&nbsp;&nbsp; 0   124k&nbsp;&nbsp;  0 --:--:--  0:00:01 --:--:--  562k<br><strong>Source:</strong><br>https://support.mozilla.org/ru/kb/parametry-soedineniya-v-firefox<br>https://techviewleo.com/configure-squid-proxy-on-centos-almalinux-rhel/<br><strong>Task:</strong><br>Перенаправление пакетов, идущих на 80-й порт, на стандартный порт прокси-сервера.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo iptables -t nat -A PREROUTING -s tip.0 -p tcp --dport 80 -j REDIRECT --to-port 3128<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables.service<br><strong>Task:</strong><br>Предоставляем доступ из Интернет к веб-серверу, который расположен в локальной сети (проброс порта). Вместо tipubuntu укажите IP-адрес вашего веб-сервера.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination tipubuntu:80<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables.service<br><strong>Task:</strong><br>Включаем маскарадинг для доступа в Интернет пользователей локальной сети.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo iptables -t nat -A POSTROUTING -o tlan -s tip.0/32 -j MASQUERADE<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables.service<br><strong>Task:</strong><br>Сканирование сети. Обнаружим активные устройства в сети.<br><strong>Decision:</strong><br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo apt install nmap<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap -sL tipcentos/24<br>...<br>Nmap scan report for thost2 (tipkali)<br>...<br>Nmap scan report for thost1 (tipcentos)<br>...<br>Nmap scan report for thost3 (tipubuntu)<br>...<br><strong>Task:</strong><br>Просканируем хост и проанализируем порт ftp. В некоторых случаях можно вытащить логин и пароль. Такое происходит, когда используются параметры входа по умолчанию.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo nmap -sV tipcentos<br>...<br>PORT&nbsp;&nbsp; STATE SERVICE&nbsp;&nbsp;VERSION<br>21/tcp   open  ftp&nbsp;&nbsp;&nbsp;&nbsp;vsftpd 3.0.5<br>22/tcp   open  ssh&nbsp;&nbsp;&nbsp;&nbsp;OpenSSH 8.7 (protocol 2.0)<br>80/tcp   open  http&nbsp;&nbsp;   nginx 1.22.1<br>3128/tcp open  http-proxy Squid http proxy 5.5<br>...<br>[tuser1@thost1 ~]$ sudo nmap -sC tipcentos -p 21<br>...<br>PORT   STATE SERVICE<br>21/tcp open  ftp<br>...<br>$ find /usr/share/nmap/scripts/ -name '*.nse' | grep ftp<br>...<br>/usr/share/nmap/scripts/ftp-brute.nse<br>...<br>$ sudo nmap --script-help ftp-brute.nse<br>...<br>  Performs brute force password auditing against FTP servers.<br>  ...<br>[tuser1@thost1 ~]$ sudo nmap --script ftp-brute.nse tipcentos -p 21<br>...<br>PORT   STATE SERVICE<br>21/tcp open  ftp<br>| ftp-brute: <br>|   Accounts: No valid accounts found<br>|   Statistics: Performed 324 guesses in 642 seconds, average tps: 7.5<br>|_  ERROR: The service seems to have failed or is heavily firewalled...<br>...<br><strong>Task:</strong><br>Сканируем диапазон портов<br><strong>Decision:</strong><br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap -sT -p 21-80 tipcentos<br>...<br>PORT   STATE  SERVICE<br>21/tcp open   ftp<br>22/tcp open   ssh<br>25/tcp closed smtp<br>53/tcp closed domain<br>...<br><strong>Task:</strong><br>Просканируем удаленный хост (агрессивный режим).<br><strong>Decision:</strong><br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap -A -T4 tipcentos<br>...<br>PORT&nbsp;&nbsp; STATE  SERVICE&nbsp;&nbsp;VERSION<br>20/tcp   closed ftp-data<br>21/tcp   open   ftp&nbsp;&nbsp;&nbsp;&nbsp;vsftpd 3.0.5<br>22/tcp   open   ssh&nbsp;&nbsp;&nbsp;&nbsp;OpenSSH 8.7 (protocol 2.0)<br>25/tcp   closed smtp<br>53/tcp   closed domain<br>143/tcp  closed imap<br>443/tcp  closed https<br>3128/tcp open   http-proxy Squid http proxy 5.5<br>|_http-server-header: squid/5.5<br>|_http-title: ERROR: The requested URL could not be retrieved<br>MAC Address: tmaccentos (QEMU virtual NIC)<br>Aggressive OS guesses: Linux 2.6.32 - 3.13 (94%), Linux 2.6.22 - 2.6.36 (92%), Linux 3.10 (92%), Linux 3.10 - 4.11 (92%), Linux 2.6.39 (92%), Linux 2.6.32 (91%), Linux 3.2 - 4.9 (91%), Linux 2.6.32 - 3.10 (91%), Linux 2.6.18 (90%), Linux 3.16 - 4.6 (90%)<br>No exact OS matches for host (test conditions non-ideal).<br>Network Distance: 1 hop<br>Service Info: OS: Unix<br>TRACEROUTE<br>HOP RTT&nbsp;&nbsp; ADDRESS<br>1   0.83 ms tipcentos<br>OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .<br>Nmap done: 1 IP address (1 host up) scanned in 24.18 seconds<br><strong>Source:</strong><br>https://losst.ru/kak-polzovatsya-nmap-dlya-skanirovaniya-seti<br><strong>Task:</strong><br>Перехватываем весь трафик для MAC-адреса tmaccentos на сетевом интерфейсе tlan.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ ifconfig<br>tlan: flags=4163&lt;UP,BROADCAST,RUNNING,MULTICAST&gt;  mtu 1500<br>...<br>&nbsp;&nbsp;&nbsp;&nbsp;ether tmaccentos  txqueuelen 1000  (Ethernet)<br>...<br>[tuser1@thost1 ~]$ sudo tcpdump -n -i tlan "ether host tmaccentos"<br>...<br>┌──(tuser2㉿thost2)-[~]<br>└─$ ssh tuser1@tipcentos<br>[tuser1@thost1 ~]$ sudo tcpdump -n -i tlan "ether host tmaccentos"<br>...<br>00:11:12.536934 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3730, win 501, options [nop,nop,TS val 3107339434 ecr 2462889902], length 0<br>00:11:12.586762 IP tipubuntu.22 &gt; tipcentos.58598: Flags [P.], seq 3730:3782, ack 2242, win 501, options [nop,nop,TS val 2462889993 ecr 3107339434], length 52<br>00:11:12.586838 IP tipubuntu.22 &gt; tipcentos.58598: Flags [P.], seq 3782:3898, ack 2242, win 501, options [nop,nop,TS val 2462889993 ecr 3107339434], length 116<br>00:11:12.588205 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3782, win 501, options [nop,nop,TS val 3107339485 ecr 2462889993], length 0<br>00:11:12.588207 IP tipcentos.58598 &gt; tipubuntu.22: Flags [.], ack 3898, win 501, options [nop,nop,TS val 3107339486 ecr 2462889993], length 0<br><strong>Task:</strong><br>Перехватываем только ICMP-пакеты<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo tcpdump -i tlan -n -nn -ttt 'ip proto \icmp'<br>...<br>┌──(tuser2㉿thost2)-[~]<br>└─$ ping tipcentos<br>...<br>64 bytes from tipcentos: icmp_seq=1 ttl=64 time=0.692 ms<br>64 bytes from tipcentos: icmp_seq=2 ttl=64 time=0.764 ms<br>64 bytes from tipcentos: icmp_seq=3 ttl=64 time=0.868 ms<br>64 bytes from tipcentos: icmp_seq=4 ttl=64 time=1.01 ms<br>64 bytes from tipcentos: icmp_seq=5 ttl=64 time=1.13 ms<br>^C<br>...<br>[tuser1@thost1 ~]$ sudo tcpdump -i tlan -n -nn -ttt 'ip proto \icmp'<br>...<br> 00:00:00.000000 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 1, length 64<br> 00:00:00.000171 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 1, length 64<br> 00:00:01.001145 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 2, length 64<br> 00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 2, length 64<br> 00:00:01.001365 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 3, length 64<br> 00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 3, length 64<br> 00:00:01.001375 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 4, length 64<br> 00:00:00.000077 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 4, length 64<br> 00:00:01.001573 IP tipcentos &gt; tipubuntu: ICMP echo request, id 4, seq 5, length 64<br> 00:00:00.000125 IP tipubuntu &gt; tipcentos: ICMP echo reply, id 4, seq 5, length 64<br><strong>Task:</strong><br>Перехватываем DNS-трафик между сервером и каким-нибудь узлом в сети.<br><strong>Decision:</strong><br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap tipwindows12<br>...<br>PORT&nbsp;&nbsp;STATE SERVICE<br>53/tcp  open  domain<br>80/tcp  open  http<br>443/tcp open  https<br>...<br>[tuser1@thost1 ~]$ sudo tcpdump -i tlan -n -nn -ttt 'host tipwindows12 and port 53'<br><strong>Task:</strong><br>Перехватываем входящий трафик на порт 80. сохраняем статистику в файл my.log для первых 500 пакетов. Будет создан бинарный файл my.log, который можно отпарсить с помощью команды<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo tcpdump -v -i tlan dst port 80<br>...<br>┌──(tuser2㉿thost2)-[~]<br>└─$ firefox tipcentos:80<br>[tuser1@thost1 ~]$ sudo tcpdump -v -i tlan dst port 80<br>...<br>14:07:24.835633 IP (tos 0x0, ttl 64, id 15549, offset 0, flags [DF], proto TCP (6), length 60)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [S], cksum 0x76d1 (incorrect -&gt; 0x9a90), seq 1076682845, win 64240, options [mss 1460,sackOK,TS val 3110711737 ecr 0,nop,wscale 7], length 0<br>14:07:24.836511 IP (tos 0x0, ttl 64, id 15550, offset 0, flags [DF], proto TCP (6), length 52)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x51b3), ack 2952605173, win 502, options [nop,nop,TS val 3110711738 ecr 3247231251], length 0<br>14:07:24.836838 IP (tos 0x0, ttl 64, id 15551, offset 0, flags [DF], proto TCP (6), length 412)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [P.], cksum 0x7831 (incorrect -&gt; 0xb0a2), seq 0:360, ack 1, win 502, options [nop,nop,TS val 3110711739 ecr 3247231251], length 360: HTTP, length: 360<br>&nbsp;&nbsp;&nbsp;&nbsp;GET / HTTP/1.1<br>&nbsp;&nbsp;&nbsp;&nbsp;Host: tipubuntu<br>&nbsp;&nbsp;&nbsp;&nbsp;User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0<br>&nbsp;&nbsp;&nbsp;&nbsp;Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8<br>&nbsp;&nbsp;&nbsp;&nbsp;Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3<br>&nbsp;&nbsp;&nbsp;&nbsp;Accept-Encoding: gzip, deflate<br>&nbsp;&nbsp;&nbsp;&nbsp;Connection: keep-alive<br>&nbsp;&nbsp;&nbsp;&nbsp;Upgrade-Insecure-Requests: 1<br>14:07:24.844920 IP (tos 0x0, ttl 64, id 15552, offset 0, flags [DF], proto TCP (6), length 52)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x4285), ack 3522, win 489, options [nop,nop,TS val 3110711747 ecr 3247231260], length 0<br>14:07:29.846014 IP (tos 0x0, ttl 64, id 15553, offset 0, flags [DF], proto TCP (6), length 52)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [F.], cksum 0x76c9 (incorrect -&gt; 0x2eef), seq 360, ack 3522, win 501, options [nop,nop,TS val 3110716748 ecr 3247231260], length 0<br>14:07:29.846795 IP (tos 0x0, ttl 64, id 15554, offset 0, flags [DF], proto TCP (6), length 52)<br>&nbsp;&nbsp;thost1.45022 &gt; thost3.http: Flags [.], cksum 0x76c9 (incorrect -&gt; 0x1b63), ack 3523, win 501, options [nop,nop,TS val 3110716749 ecr 3247236262], length 0<br>[tuser1@thost1 ~]$ sudo tcpdump -v -n -w my.log dst port 80 -c 500<br>...<br>[tuser1@thost1 ~]$ ls my.log<br>my.log<br>[tuser1@thost1 ~]$ sudo tcpdump -nr my.log | awk '{print $3}' | grep -oE '[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}' | sort | uniq -c | sort -rn<br>reading from file my.log, link-type EN10MB (Ethernet), snapshot length 262144<br>dropped privs to tcpdump<br>&nbsp;&nbsp;  6 tipkali<br><strong>Task:</strong><br>IP-адреса, которые вызывают подозрение, можно заблокировать в iptables с помощью команды, указанной ниже.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo iptables -A INPUT -s tipkali -j DROP<br>[tuser1@thost1 ~]$ sudo service iptables save<br>[tuser1@thost1 ~]$ sudo systemctl restart iptables.service<br><strong>Task:</strong><br>Установка и настройка tripwire.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo dnf -y install epel-releasey<br>[tuser1@thost1 ~]$ sudo dnf -y install tripwire<br>[tuser1@thost1 ~]$ sudo tripwire-setup-keyfiles<br>[tuser1@thost1 ~]$ sudo tripwire --init<br>...<br>### Warning: File system error.<br>### Filename: /proc/pci<br>### Нет такого файла или каталога<br>### Continuing...<br>...<br>[tuser1@thost1 ~]$ sudo cat /etc/tripwire/twpol.txt<br>...<br>&nbsp;&nbsp; /proc/pci&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -&gt; $(Device) ;<br>...<br>[tuser1@thost1 ~]$ sudo vim /etc/tripwire/twpol.txt<br>[tuser1@thost1 ~]$ sudo cat /etc/tripwire/twpol.txt<br>...<br>&nbsp;&nbsp; #/proc/pci&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -&gt; $(Device) ;<br>...<br>[tuser1@thost1 ~]$ sudo tripwire --update-policy --secure-mode low /etc/tripwire/twpol.txt<br>[tuser1@thost1 ~]$ sudo tripwire --check —interactive<br><strong>Task:</strong><br>Создаем конфигурацию, Создаем базу данных<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ ls /etc/tripwire/<br>centos-local.key  site.key  tw.cfg  twcfg.txt  tw.pol  tw.pol.bak  twpol.txt<br>[tuser1@thost1 ~]$ sudo twadmin -m F -c /etc/tripwire/tw.cfg -S /etc/tripwire/site.key /etc/tripwire/twcfg.txt<br>[tuser1@thost1 ~]$ sudo vim /etc/tripwire/twpolmake.pl<br>[tuser1@thost1 ~]$ cat /etc/tripwire/twpolmake.pl<br>#!/usr/bin/perl<br># Tripwire Policy File customize tool<br># ----------------------------------------------------------------<br># Copyright (C) 2003 Hiroaki Izumi<br># This program is free software; you can redistribute it and/or<br># modify it under the terms of the GNU General Public License<br># as published by the Free Software Foundation; either version 2<br># of the License, or (at your option) any later version.<br># This program is distributed in the hope that it will be useful,<br># but WITHOUT ANY WARRANTY; without even the implied warranty of<br># MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the<br># GNU General Public License for more details.<br># You should have received a copy of the GNU General Public License<br># along with this program; if not, write to the Free Software<br># Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.<br># ----------------------------------------------------------------<br># Usage:<br>#&nbsp;&nbsp; perl twpolmake.pl {Pol file}<br># ----------------------------------------------------------------<br>#<br>$POLFILE=$ARGV[0];<br>open(POL,"$POLFILE") or die "open error: $POLFILE" ;<br>my($myhost,$thost) ;<br>my($sharp,$tpath,$cond) ;<br>my($INRULE) = 0 ;<br>while (&lt;POL&gt;) {<br>&nbsp;&nbsp;chomp;<br>&nbsp;&nbsp;if (($thost) = /^HOSTNAME\s*=\s*(.*)\s*;/) {<br>&nbsp;&nbsp;&nbsp;&nbsp;$myhost = `hostname` ; chomp($myhost) ;<br>&nbsp;&nbsp;&nbsp;&nbsp;if ($thost ne $myhost) {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_="HOSTNAME=\"$myhost\";" ;<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>&nbsp;&nbsp;elsif ( /^{/ ) {<br>&nbsp;&nbsp;&nbsp;&nbsp;$INRULE=1 ;<br>&nbsp;&nbsp;}<br>&nbsp;&nbsp;elsif ( /^}/ ) {<br>&nbsp;&nbsp;&nbsp;&nbsp;$INRULE=0 ;<br>&nbsp;&nbsp;}<br>&nbsp;&nbsp;elsif ($INRULE == 1 and ($sharp,$tpath,$cond) = /^(\s*\#?\s*)(\/\S+)\b(\s+-&gt;\s+.+)$/) {<br>&nbsp;&nbsp;&nbsp;&nbsp;$ret = ($sharp =~ s/\#//g) ;<br>&nbsp;&nbsp;&nbsp;&nbsp;if ($tpath eq '/sbin/e2fsadm' ) {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$cond =~ s/;\s+(tune2fs.*)$/; \#$1/ ;<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;&nbsp;&nbsp;if (! -s $tpath) {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_ = "$sharp#$tpath$cond" if ($ret == 0) ;<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;&nbsp;&nbsp;else {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;$_ = "$sharp$tpath$cond" ;<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>&nbsp;&nbsp;print "$_\n" ;<br>}<br>close(POL) ;<br>[tuser1@thost1 ~]$ sudo perl /etc/tripwire/twpolmake.pl /etc/tripwire/twpol.txt &gt; /etc/tripwire/twpol.txt.new <br>[tuser1@thost1 ~]$ sudo twadmin -m P -c /etc/tripwire/tw.cfg -p /etc/tripwire/tw.pol -S /etc/tripwire/site.key /etc/tripwire/twpol.txt.new<br>[tuser1@thost1 ~]$ sudo tripwire -m i -s -c /etc/tripwire/tw.cfg<br>[tuser1@thost1 ~]$ sudo tripwire -m c -s -c /etc/tripwire/tw.cfg<br>Open Source Tripwire(R) 2.4.3.7 Integrity Check Report<br>Report generated by:&nbsp;&nbsp;&nbsp;&nbsp;  root<br>Report created on:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Вс 29 окт 2023 14:26:04<br>Database last updated on:&nbsp;&nbsp; Never<br>...<br>===============================================================================<br>Object Summary: <br>===============================================================================<br>-------------------------------------------------------------------------------<br># Section: Unix File System<br>-------------------------------------------------------------------------------<br>No violations.<br>===============================================================================<br>Error Report: <br>===============================================================================<br>...<br>[tuser1@thost1 ~]$ sudo ls /var/lib/tripwire/report<br>итого 28<br>-rw-r--r--. 1 root root  350 окт 29 13:55 centos-20231029-135511.twr<br>-rw-r--r--. 1 root root  350 окт 29 13:57 centos-20231029-135712.twr<br>-rw-r--r--. 1 root root  350 окт 29 14:00 centos-20231029-140029.twr<br>-rw-r--r--. 1 root root  350 окт 29 14:08 centos-20231029-140853.twr<br>-rw-r--r--. 1 root root  350 окт 29 14:09 centos-20231029-140919.twr<br>-rw-r--r--. 1 root root 6446 окт 29 14:27 centos-20231029-142604.twr<br><strong>Task:</strong><br>Проверим на работоспособность утилиты Tripwire. Создав файл в системе, утилита должна показать, что добавлен был файл<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo touch /var/lib/tripwire/tfile3.txt<br>[tuser1@thost1 ~]$ sudo tripwire -m c -s -c /etc/tripwire/tw.cfg<br>Open Source Tripwire(R) 2.4.3.7 Integrity Check Report<br>...<br>-------------------------------------------------------------------------------<br>Rule Name: Tripwire Data Files (/var/lib/tripwire)<br>Severity Level: 100<br>-------------------------------------------------------------------------------<br>Added:<br>"/var/lib/tripwire/tfile3.txt"<br>===============================================================================<br>Error Report: <br>===============================================================================<br>...<br><strong>Source:</strong><br>https://linux-notes.org/ustanovka-i-nastrojka-tripwire-v-centos-redhat-fedora/?ysclid=loazeq8vjc96566460 <br>https://www.server-world.info/en/note?os=CentOS_7&p=tripwire<br>https://www.lisenet.com/2017/configure-tripwire-on-centos-7/<br><strong>Task:</strong><br>Install and Use Rkhunter for Security<br><strong>Decision:</strong><br>myportfolio$ sudo apt install rkhunter<br>myportfolio$ sudo vim /etc/rkhunter.conf<br>myportfolio$ sudo cat /etc/rkhunter.conf | grep /bin/false<br>#WEB_CMD="/bin/false"<br>myportfolio$ sudo cat /etc/rkhunter.conf | grep UPDATE_MIRRORS<br>UPDATE_MIRRORS=1<br>myportfolio$ sudo cat /etc/rkhunter.conf | grep MIRRORS_MODE<br># The MIRRORS_MODE option tells rkhunter which mirrors are to be used when<br>MIRRORS_MODE=0<br>myportfolio$ sudo rkhunter -C<br>myportfolio$ sudo rkhunter --update<br>[ Rootkit Hunter version 1.4.6 ]<br>Checking rkhunter data files...<br>Checking file mirrors.dat&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ No update ]<br>Checking file programs_bad.dat&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ No update ]<br>Checking file backdoorports.dat&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  [ No update ]<br>Checking file suspscan.dat&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ No update ]<br>Checking file i18n/cn&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ Skipped ]<br>Checking file i18n/de&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ Skipped ]<br>Checking file i18n/en&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ No update ]<br>Checking file i18n/tr&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ Skipped ]<br>Checking file i18n/tr.utf8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ Skipped ]<br>Checking file i18n/zh&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ Skipped ]<br>Checking file i18n/zh.utf8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ Skipped ]<br>Checking file i18n/ja&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;   [ Skipped ]<br>myportfolio$ sudo rkhunter --propupd<br>myportfolio$ sudo vim /etc/cron.daily/rkhunter.sh<br>myportfolio$ cat /etc/cron.daily/rkhunter.sh<br>#!/bin/sh<br>(<br>/usr/local/bin/rkhunter --versioncheck<br>/usr/local/bin/rkhunter --update<br>/usr/local/bin/rkhunter --cronjob --report-warnings-only<br>) | /bin/mail -s 'rkhunter Daily Run (tip)' tdb2@gmail.com<br>myportfolio$ sudo chmod 755 /etc/cron.daily/rkhunter.sh<br>myportfolio$ sudo rkhunter --list rootkits<br>myportfolio$ sudo rkhunter --check<br>myportfolio$ sudo cat /var/log/rkhunter.log | grep hidden<br>myportfolio$ sudo cat /var/log/rkhunter.log | grep -A5 "\[ Warning \]"<br><strong>Source:</strong><br>Поиск вирусов с помощью RkHunter - https://losst.pro/proverka-linux-na-virusy?ysclid=lv2diq667c645946178#poisk-virusov-s-pomoshchyu-rkhunter<br>Install and Use Rkhunter for Security - https://vegastack.com/tutorials/how-to-install-and-use-rkhunter-for-security-on-ubuntu-22-04/<br>https://linux-notes.org/poisk-rutkitov-v-debian-ubuntu-linux-mint-i-red-hat-centos-fedora/?ysclid=lob3rn9gk6547904603<br>https://winitpro.ru/index.php/2020/04/21/planirovshhik-zadach-cron-v-linux/<br><strong>Task:</strong><br>сравнить образ раздела или файла перед взломом с образом из взломанной системы.<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo dd if=/bin/ls of=ls.dd | md5sum ls.dd &gt; sum.txt<br>274+1 записей получено<br>274+1 записей отправлено<br>140760 байт (141 kB, 137 KiB) скопирован, 0,00362538 s, 38,8 MB/s<br>[tuser1@thost1 ~]$ sudo cat sum.txt<br>0ad8006df0caff12335f45fdf6c7c0f7  ls.dd<br>[tuser1@thost1 ~]$ sudo file /bin/ls<br>/bin/ls: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=bdfe7bf382f12e8361d590aa148cb3e591f83d30, for GNU/Linux 3.2.0, stripped<br>[tuser1@thost1 ~]$ sudo stat /bin/ls<br>  Файл: /bin/ls<br>  Размер: 140760&nbsp;&nbsp;&nbsp;&nbsp;Блоков: 280&nbsp;&nbsp;&nbsp;&nbsp;Блок В/В: 4096   обычный файл<br>Устройство: fd00h/64768d&nbsp;&nbsp;&nbsp;&nbsp;Инода: 33894006&nbsp;&nbsp;Ссылки: 1<br>Доступ: (0755/-rwxr-xr-x)  Uid: (&nbsp;&nbsp;0/&nbsp;&nbsp;root)   Gid: (&nbsp;&nbsp;0/&nbsp;&nbsp;root)<br>Контекст: system_u:object_r:bin_t:s0<br>Доступ:&nbsp;&nbsp;&nbsp;&nbsp;2023-10-29 10:10:37.199000000 +0800<br>Модифицирован: 2023-01-06 19:42:38.000000000 +0800<br>Изменён:&nbsp;&nbsp;   2023-09-28 12:38:12.337575533 +0800<br>Создан:&nbsp;&nbsp;&nbsp;&nbsp;2023-09-28 12:38:12.333575533 +0800<br><strong>Task:</strong><br>создать список контрольных сумм для популярных файлов, которые обычно могут изменяться при взломе системы<br><strong>Decision:</strong><br>[tuser1@thost1 ~]$ sudo md5sum /bin/ls &gt;&gt; sums.txt<br>[tuser1@thost1 ~]$ sudo cat sums.txt<br>07c62424e4c26afc0d7e393bab60546c  /bin/ls<br><strong>Source:</strong><br>https://www.youtube.com/playlist?list=PLtSGboPf3g50Aejrp6KjQsqqjxvAO4aKw<br>https://tokmakov.msk.ru/blog/item/477<br>https://linux-notes.org/fil-tratsiya-mac-ispol-zuya-iptables-v-linux/?ysclid=lo0z3u2sro842609893<br>https://ru.linux-console.net/?p=1297&ysclid=lo0tx5owhk496498608<br>https://itsecforu.ru/2022/01/14/%F0%9F%90%89-%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0-http-%D1%81%D0%B5%D1%80%D0%B2%D0%B5%D1%80%D0%B0-kali-linux/?ysclid=lo4exvw84m943299837<br>https://hackware.ru/?p=15739<br>https://uzverss.livejournal.com/109496.html?ysclid=lo9hqkxw2s612202120<br>https://habr.com/ru/companies/alexhost/articles/531170/<br>https://drive.google.com/drive/folders/1SUpqELdGy0O2zEDbmfnx35zViexy5xZL&nbsp;&nbsp;<br>https://habr.com/sandbox/29825/<br>https://kamaok.org.ua/?p=813<br>https://habr.com/company/first/blog/243487/<br>https://habr.com/sandbox/29825/<br><strong>Task:</strong><br>Не используйте незащищённые сервисы<br><strong>Decision:</strong><br>myportfolio$ sudo groupadd sftp-group<br>myportfolio$ sudo useradd --no-create-home --gid sftp-group sftptuser<br>myportfolio$ sudo passwd sftptuser<br>myportfolio$ sudo mkdir /srv/sftp<br>myportfolio$ sudo chown root:root /srv/sftp<br>myportfolio$ sudo chmod 755 /srv/sftp<br>myportfolio$ sudo mkdir /srv/sftp/sftptuser<br>myportfolio$ sudo chown sftptuser:sftp-group /srv/sftp/sftptuser<br>myportfolio$ sudo vim /etc/ssh/sshd_config<br>myportfolio$ cat /etc/ssh/sshd_config<br>...<br># override default of no subsystems<br>#Subsystem   sftp  /usr/lib/openssh/sftp-server<br># Example of overriding settings on a per-user basis<br>#Match User anoncvs<br>#   X11Forwarding no<br>#   AllowTcpForwarding no<br>#   PermitTTY no<br>#   ForceCommand cvs server<br># использовать встроенный sftp-сервер<br>Subsystem  sftp  internal-sftp<br># только для пользователей группы sftp-group<br>Match Group sftp-group<br>  # только работа с файлами, запрет shell<br>  ForceCommand internal-sftp<br>  # разрешить аутентификацию по паролю<br>  PasswordAuthentication yes<br>  # разрешить доступ только к /srv/sftp<br>  ChrootDirectory /srv/sftp<br>  # запретить все, что не нужно для работы<br>  PermitTunnel no<br>  AllowAgentForwarding no<br>  AllowTcpForwarding no<br>  X11Forwarding no<br>myportfolio$ sudo systemctl restart sshd.service<br>myportfolio$ sudo cp thost/datapsql.dump /srv/sftp/sftptuser/<br>myportfolio$ exit<br>myportfolio$ sftp sftptuser@tip<br>sftp&gt; pwd<br>sftp&gt; lpwd<br>sftp&gt; cd sftpuser/<br>sftp&gt; ls<br>datapsql.dump<br>sftp&gt; get datapsql.dump <br>sftp&gt; lls<br>datapsql.dump <br>sftp&gt; exit<br><strong>Source:</strong><br>Не используйте незащищённые сервисы - https://losst.pro/bezopasnost-servera-linux?ysclid=lvlnefu3b1596223515#nastroyka-bezopasnosti-servera-linux<br>Настройка SFTP-сервера - https://tokmakov.msk.ru/blog/item/484?ysclid=lvlnz4iz7m313316662<br><strong>Task:</strong><br>Проанализировать наличие открытых портов в Веб-сервере Портфолио.<br><strong>Decision:</strong><br>myportfolio$ ip ro<br>default via tip.1 dev eth0 proto dhcp src tipmyportfolio metric 100 <br>...<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap -sV tipmyportfolio<br>...<br>PORT   STATE SERVICE  VERSION<br>22/tcp open ssh&nbsp;&nbsp;OpenSSH 8.9p1 Ubuntu 3ubuntu0.7 (Ubuntu Linux; protocol 2.0)<br>80/tcp open http   Apache httpd 2.4.52 ((Ubuntu))<br>5432/tcp open postgresql PostgreSQL DB 9.6.0 or later<br>8000/tcp open http-alt WSGIServer/0.2 CPython/3.10.12<br>...<br>┌──(tuser2㉿thost2)-[~]<br>└─$ sudo nmap -sC tip -p 8000<br>...<br>PORT   STATE SERVICE<br>8000/tcp open http-alt WSGIServer/0.2 CPython/3.10.12<br>|_http-server-header: WSGIServer/0.2 CPython/3.10.12<br>|_http-title: DisallowedHost&nbsp;&nbsp; at /<br>...<br>myportfolio$ sudo ss -lptn 'sport = :8000'<br>State&nbsp;&nbsp; Recv-Q&nbsp;&nbsp; Send-Q&nbsp;&nbsp;&nbsp;&nbsp;   Local Address:Port&nbsp;&nbsp;&nbsp;&nbsp;   Peer Address:Port&nbsp;&nbsp; Process&nbsp;&nbsp; <br>LISTEN&nbsp;&nbsp; 0&nbsp;&nbsp;   10&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; tip:8000&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.0.0.0:*&nbsp;&nbsp;   users:(("python",pid=4152,fd=4))<br>myportfolio$ ps -p 4152<br>  PID TTY&nbsp;&nbsp; TIME CMD<br>4152 ?&nbsp;&nbsp;00:02:38 python<br><strong>Source:</strong><br>Минимум программ и открытых портов - https://losst.pro/bezopasnost-servera-linux?ysclid=lvlnefu3b1596223515<br>Как пользоваться Nmap для сканирования сети - https://losst.pro/kak-polzovatsya-nmap-dlya-skanirovaniya-seti?ysclid=lvn3ieyg61120957263</p>
